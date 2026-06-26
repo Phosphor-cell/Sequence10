@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "title": "Cultivation AFK Realm: Divine Descent",
+    "description": "Unified 32-bit Architecture with SVG Assembly & 20-Class Divine Summoning."
+  },
+  "global_config": {
+    "stat_architecture": "uint32",
+    "absolute_cap": 4294967295,
+    "canvas_res": 512,
+    "shattered_realms_active": true,
+    "database_constraints": {
+      "bloodline_max": 120,
+      "soul_max": 120,
+      "ai_directive": "Hard-cap enforcement. Reuse existing registries if count >= 120."
+    }
+  },
+  "summoning_engine": {
+    "class_registry": {
+      "mortal": ["Spearman", "Archer", "Swordsman", "Scout", "Herbalist", "Assassin", "Mage", "Priest", "Mercenary", "Trapper"],
+      "heroic": ["Paladin", "Spellblade", "Shadow-Dancer", "Beast-Master", "Sage"],
+      "angelic": ["Seraph", "Cherub", "Virtue", "Dominion", "Archangel"],
+      "divine": ["Creator", "Void-God", "Time-Weaver", "Life-Bringer", "Entropy"]
+    },
+    "inheritance_rules": {
+      "hero": { "rarity": "Anomalous", "traits": "1 God-Ability, 4 Elite" },
+      "angelic": { "rarity": "Monumental", "traits": "3 God-Abilities, 2 Common, 'Flight' Passive" },
+      "divine": { "rarity": "Impossible", "traits": "5 God-Abilities" }
+    }
+  },
+  "svg_assembly_engine": {
+    "canvas_size": 512,
+    "shading_mode": "multi-layered-gradient",
+    "layer_order": ["hilt", "blade", "rune"],
+    "component_registry": {
+      "blades": "lib/blades.json",
+      "hilts": "lib/hilts.json",
+      "runes": "lib/runes.json"
+    }
+  },
+  "combat_engine": {
+    "damage_types": ["Slashing", "Blunt", "Piercing", "Fire", "Ice", "Lightning", "Poison", "Water", "Wind", "Hellfire", "Void", "Divine", "Entropy"],
+    "endgame_cap": {
+      "god_mode_threshold": 4080218930,
+      "max_boss_ehp": 16000000000,
+      "cataclysm_override": {
+        "reality_shatter_strike": 0.015,
+        "void_evasion": 0.03
+      }
+    }
+  },
+  "armor_set_engine": {
+    "roll_tiers": {
+      "Mundane": [10, 500], "Notable": [500, 5000], "Exemplary": [5000, 100000],
+      "Anomalous": [100000, 5000000], "Monumental": [5000000, 250000000], "Impossible": [250000000, 4294967295]
+    }
+  },
+  "trait_registries": {
+    "pure_bloodlines": [{"id": "b1", "name": "Iron-Will", "tier": 1}, {"id": "b21", "name": "Reality-Anchor", "tier": 21}],
+    "corrupted_bloodlines": [{"id": "cb1", "name": "Rot-Blood", "tier": 1}, {"id": "cb21", "name": "The Original Sin", "tier": 21}]
+  },
+  "ai_generation_schemas": {
+    "entity_schema": {
+      "origin": "string_from_class_registry",
+      "stats": "uint32",
+      "svg_assembly": {
+        "blade_id": "string",
+        "hilt_id": "string",
+        "rune_id": "string",
+        "colors": ["primary", "accent", "glow"]
+      }
+    }
+  }
+}

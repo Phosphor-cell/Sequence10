@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "components": {
+    "blades": [
+      {
+        "id": "b_01",
+        "name": "Celestial Edge",
+        "path": "M 256 50 L 280 450 L 256 480 L 232 450 Z",
+        "gradients": {
+          "main": "linear-gradient(to bottom, #E0E0E0, #A0A0A0)",
+          "shine": "linear-gradient(to right, rgba(255,255,255,0.5), transparent)"
+        }
+      }
+    ],
+    "hilts": [
+      {
+        "id": "h_01",
+        "name": "Gilded Cross",
+        "path": "M 240 480 H 272 V 512 H 240 Z",
+        "gradients": {
+          "metal": "radial-gradient(circle, #FFD700, #B8860B)"
+        }
+      }
+    ],
+    "runes": [
+      {
+        "id": "r_01",
+        "name": "Void Sigil",
+        "path": "M 256 150 L 270 200 L 256 180 L 242 200 Z",
+        "gradients": {
+          "glow": "radial-gradient(circle, var(--glow-color), transparent)"
+        }
+      }
+    ]
+  }
+}
