@@ -451,3 +451,74 @@ GROUP BY p.id;
 -- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO app_user;
 -- ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO app_user;
 -- ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO app_user;
+
+CREATE TABLE IF NOT EXISTS battle_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  enemy_name VARCHAR(256),
+  enemy_level BIGINT CHECK (enemy_level > 0),
+  player_health_before INT CHECK (player_health_before >= 0),
+  player_health_after INT CHECK (player_health_after >= 0),
+  damage_dealt BIGINT CHECK (damage_dealt >= 0),
+  victory BOOLEAN,
+  gold_earned BIGINT DEFAULT 0 CHECK (gold_earned >= 0),
+  exp_earned BIGINT DEFAULT 0 CHECK (exp_earned >= 0),
+  loot_dropped UUID,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_battle_player ON battle_log(player_id);
+CREATE INDEX idx_battle_date ON battle_log(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS ascensions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE UNIQUE,
+  ascension_level INT NOT NULL DEFAULT 0 CHECK (ascension_level >= 0),
+  star_level INT NOT NULL DEFAULT 0 CHECK (star_level >= 0 AND star_level <= 10),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS idle_state (
+  player_id UUID PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
+  is_battling BOOLEAN DEFAULT FALSE,
+  battles_won_idle BIGINT DEFAULT 0 CHECK (battles_won_idle >= 0),
+  gold_earned_idle BIGINT DEFAULT 0 CHECK (gold_earned_idle >= 0),
+  exp_earned_idle BIGINT DEFAULT 0 CHECK (exp_earned_idle >= 0),
+  last_idle_sync TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sync_queue (
+  id SERIAL PRIMARY KEY,
+  table_name VARCHAR(64) NOT NULL,
+  record_id TEXT NOT NULL,
+  action VARCHAR(32) NOT NULL CHECK (action IN ('INSERT', 'UPDATE', 'DELETE')),
+  data JSONB NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  synced_at TIMESTAMP WITH TIME ZONE,
+  retry_count INT DEFAULT 0 CHECK (retry_count >= 0)
+);
+CREATE INDEX idx_sync_pending ON sync_queue(synced_at) WHERE synced_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS limited_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  seed BIGINT NOT NULL UNIQUE,
+  rarity VARCHAR(32) NOT NULL,
+  attack_bonus INT DEFAULT 0 CHECK (attack_bonus >= 0),
+  defense_bonus INT DEFAULT 0 CHECK (defense_bonus >= 0),
+  health_bonus INT DEFAULT 0 CHECK (health_bonus >= 0),
+  item_name VARCHAR(256) NOT NULL,
+  flavor_text TEXT,
+  unique_property VARCHAR(512),
+  svg_cache VARCHAR(8192),
+  available_until BIGINT NOT NULL CHECK (available_until > 0),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS api_usage_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  api_name VARCHAR(32),
+  tokens_used INT CHECK (tokens_used > 0),
+  cache_hit BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_usage_date ON api_usage_log(created_at DESC);

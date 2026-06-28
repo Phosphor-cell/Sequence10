@@ -1,0 +1,84 @@
+# .github/workflows/codeql.yml
+# GitHub CodeQL security analysis — matches axle's setup.
+# Analyses both C++ (client) and JavaScript/TypeScript (server).
+# Runs on push, PR, and weekly schedule (catches newly discovered CVEs
+# even when the codebase hasn't changed).
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+    branches: [main, development]
+  schedule:
+    # Every Monday at 08:00 UTC
+    - cron: '0 8 * * 1'
+
+permissions:
+  actions:       read
+  contents:      read
+  security-events: write   # required to upload SARIF results
+
+jobs:
+  analyze:
+    name: CodeQL / ${{ matrix.language }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # C++ client — needs Linux for best CodeQL C++ support
+          - language: c-cpp
+            os: ubuntu-latest
+            build_mode: manual
+
+          # TypeScript server
+          - language: javascript-typescript
+            os: ubuntu-latest
+            build_mode: none    # interpreted — no build needed
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── C++ specific setup ──────────────────────────────────────────
+      - name: Install deps (C++ only)
+        if: matrix.language == 'c-cpp'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            libgl1-mesa-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libssl-dev
+
+      - name: Cache CMake deps (C++ only)
+        if: matrix.language == 'c-cpp'
+        uses: actions/cache@v4
+        with:
+          path: client/build-codeql/_deps
+          key: cmake-codeql-${{ hashFiles('client/CMakeLists.txt') }}
+          restore-keys: cmake-codeql-
+
+      # ── CodeQL init ──────────────────────────────────────────────────
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build_mode }}
+          # Use security-and-quality pack (same as axle) for broader coverage
+          queries: security-and-quality
+
+      # ── Manual build step (C++ only) ─────────────────────────────────
+      - name: Build C++ for CodeQL
+        if: matrix.language == 'c-cpp'
+        run: |
+          cmake -S client -B client/build-codeql \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DFETCHCONTENT_QUIET=ON
+          cmake --build client/build-codeql --parallel $(nproc)
+
+      # ── Analyse ──────────────────────────────────────────────────────
+      - name: Analyse
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}

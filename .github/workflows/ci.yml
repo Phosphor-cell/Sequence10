@@ -1,0 +1,181 @@
+# .github/workflows/ci.yml
+# Main CI: compiler matrix × build types, then sanitizer runs.
+# Mirrors the axle project pattern: GCC + Clang, Debug + Release,
+# ASan/UBSan and TSan as separate jobs so failures are easy to isolate.
+#
+# Triggered on every push and PR that touches client/ or server/.
+
+name: CI
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+    branches: [main, development]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true   # cancel stale runs on force-push
+
+# ── Server jobs ───────────────────────────────────────────────────────
+
+jobs:
+  server-typecheck:
+    name: Server / TypeScript (${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20]          # test on both LTS versions
+
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npm run build       # tsc --noEmit
+
+  server-test:
+    name: Server / Loot tests
+    runs-on: ubuntu-latest
+    needs: server-typecheck
+
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - name: Compile loot_core for test runner
+        run: |
+          npx tsc --target ES2020 --module commonjs \
+            --outDir tests/dist api/loot_core.ts
+          cp tests/dist/loot_core.js tests/loot.js
+      - run: node tests/test_loot.js
+
+# ── Client / compiler matrix ──────────────────────────────────────────
+
+  client-matrix:
+    name: Client / ${{ matrix.compiler }} ${{ matrix.version }} (${{ matrix.build_type }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # GCC 12 — widely deployed LTS baseline
+          - compiler: GCC
+            version: "12"
+            cc: gcc-12
+            cxx: g++-12
+            build_type: Debug
+          - compiler: GCC
+            version: "12"
+            cc: gcc-12
+            cxx: g++-12
+            build_type: Release
+
+          # GCC 13 — current ubuntu-24 default
+          - compiler: GCC
+            version: "13"
+            cc: gcc-13
+            cxx: g++-13
+            build_type: Debug
+          - compiler: GCC
+            version: "13"
+            cc: gcc-13
+            cxx: g++-13
+            build_type: Release
+
+          # Clang 17 — matches axle's CI exactly
+          - compiler: Clang
+            version: "17"
+            cc: clang-17
+            cxx: clang++-17
+            build_type: Debug
+          - compiler: Clang
+            version: "17"
+            cc: clang-17
+            cxx: clang++-17
+            build_type: Release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install compiler + system deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            gcc-12 g++-12 gcc-13 g++-13 \
+            clang-17 \
+            libgl1-mesa-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libssl-dev
+
+      - name: Cache CMake deps
+        uses: actions/cache@v4
+        with:
+          path: client/build/_deps
+          key: cmake-${{ matrix.compiler }}-${{ matrix.version }}-${{ matrix.build_type }}-${{ hashFiles('client/CMakeLists.txt') }}
+          restore-keys: cmake-${{ matrix.compiler }}-${{ matrix.version }}-
+
+      - name: Configure
+        env:
+          CC:  ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake -S client -B client/build \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+            -DFETCHCONTENT_QUIET=ON
+
+      - name: Build
+        run: cmake --build client/build --config ${{ matrix.build_type }} --parallel $(nproc)
+
+# ── Windows and macOS builds (Release only in CI, full in release.yml) ─
+
+  client-windows:
+    name: Client / MSVC Windows Release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache CMake deps
+        uses: actions/cache@v4
+        with:
+          path: client/build/_deps
+          key: cmake-msvc-${{ hashFiles('client/CMakeLists.txt') }}
+          restore-keys: cmake-msvc-
+      - name: Configure + Build
+        run: |
+          cmake -S client -B client/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build client/build --config Release --parallel
+        shell: pwsh
+
+  client-macos:
+    name: Client / AppleClang macOS Release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache CMake deps
+        uses: actions/cache@v4
+        with:
+          path: client/build/_deps
+          key: cmake-macos-${{ hashFiles('client/CMakeLists.txt') }}
+          restore-keys: cmake-macos-
+      - name: Configure + Build
+        run: |
+          cmake -S client -B client/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build client/build --config Release --parallel $(sysctl -n hw.ncpu)

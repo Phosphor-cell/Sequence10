@@ -1,0 +1,118 @@
+# .github/workflows/release.yml
+# Triggered by a version tag (v*) or manually.
+# Builds Windows + Linux + macOS, then publishes a GitHub Release.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label (e.g. v0.2.0)'
+        required: true
+        default: 'v0.1.0'
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+            binary: client/build/Release/CultivationAFK.exe
+            assets: client/build/Release/assets/
+            zip: CultivationAFK-Windows.zip
+
+          - os: ubuntu-latest
+            name: Linux
+            binary: client/build/CultivationAFK
+            assets: client/build/assets/
+            zip: CultivationAFK-Linux.zip
+            apt: >-
+              libgl1-mesa-dev libx11-dev libxrandr-dev
+              libxinerama-dev libxcursor-dev libxi-dev libxext-dev libssl-dev
+
+          - os: macos-latest
+            name: macOS
+            binary: client/build/CultivationAFK
+            assets: client/build/assets/
+            zip: CultivationAFK-macOS.zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux deps
+        if: matrix.apt
+        run: sudo apt-get update -q && sudo apt-get install -y ${{ matrix.apt }}
+
+      - name: Cache CMake deps
+        uses: actions/cache@v4
+        with:
+          path: client/build/_deps
+          key: cmake-release-${{ matrix.os }}-${{ hashFiles('client/CMakeLists.txt') }}
+          restore-keys: cmake-release-${{ matrix.os }}-
+
+      - name: Configure
+        run: cmake -S client -B client/build -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+
+      - name: Build
+        run: cmake --build client/build --config Release --parallel
+        shell: bash
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path "${{ matrix.binary }}", "${{ matrix.assets }}" -DestinationPath "${{ matrix.zip }}"
+        shell: pwsh
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: zip -r "${{ matrix.zip }}" "${{ matrix.binary }}" "${{ matrix.assets }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.zip }}
+          path: ${{ matrix.zip }}
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Resolve version tag
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: "Cultivation AFK Realm ${{ steps.ver.outputs.tag }}"
+          body: |
+            ## Downloads
+            | Platform | File |
+            |----------|------|
+            | Windows  | CultivationAFK-Windows.zip |
+            | Linux    | CultivationAFK-Linux.zip   |
+            | macOS    | CultivationAFK-macOS.zip   |
+
+            Extract and run — the game connects to the backend automatically.
+          files: dist/**/*.zip
+          prerelease: ${{ contains(steps.ver.outputs.tag, '-') }}

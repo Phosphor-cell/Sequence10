@@ -1,11 +1,51 @@
-# Never commit local secrets
+# ── C++ build output ───────────────────────────────────────────────────
+client/build/
+client/.cache/
+
+# ── Downloaded dependencies (FetchContent re-fetches these) ────────────
+# third_party/sqlite3 is INTENTIONALLY committed (bundled, not downloaded)
+# Everything else under _deps is auto-fetched by CMake
+client/build/_deps/
+
+# ── IDE / editor ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln.DotSettings.user
+CMakeSettings.json
+.vs/
+
+# ── Compiled object files ──────────────────────────────────────────────
+*.o
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.a
+*.so
+*.dll
+*.exe
+
+# ── Node / server ──────────────────────────────────────────────────────
+server/node_modules/
+server/.vercel/
+server/tests/dist/
+server/tests/loot.js
+
+# ── Environment / secrets (NEVER commit these) ─────────────────────────
 .env
 .env.local
 .env.*.local
+server/.env
+server/.env.local
 
-# Vercel local dev cache
-.vercel/
+# ── OS noise ───────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
 
-# Build output
-node_modules/
-*.js.map
+# ── Logs ───────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*

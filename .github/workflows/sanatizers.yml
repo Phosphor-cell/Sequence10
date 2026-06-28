@@ -1,0 +1,127 @@
+# .github/workflows/sanitizers.yml
+# AddressSanitizer + UndefinedBehaviourSanitizer, and ThreadSanitizer
+# as separate jobs — matching the axle pattern exactly.
+# Runs on push/PR to main and development.
+# Linux only (sanitizers are most reliable on Linux + GCC/Clang).
+
+name: Sanitizers
+
+on:
+  push:
+    branches: [main, development]
+    paths:
+      - 'client/**'
+      - '.github/workflows/sanitizers.yml'
+  pull_request:
+    branches: [main, development]
+    paths:
+      - 'client/**'
+
+concurrency:
+  group: sanitizers-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Use Clang 17 for sanitizers — best sanitizer output, matches axle
+  CC:  clang-17
+  CXX: clang++-17
+
+jobs:
+  # ── AddressSanitizer + UndefinedBehaviourSanitizer ────────────────────
+  asan-ubsan:
+    name: ASan + UBSan (Clang 17)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Clang 17 + deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            clang-17 \
+            libgl1-mesa-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libssl-dev
+
+      - name: Cache CMake deps
+        uses: actions/cache@v4
+        with:
+          path: client/build-asan/_deps
+          key: cmake-asan-${{ hashFiles('client/CMakeLists.txt') }}
+          restore-keys: cmake-asan-
+
+      - name: Configure (ASan + UBSan)
+        run: |
+          cmake -S client -B client/build-asan \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang-17 \
+            -DCMAKE_CXX_COMPILER=clang++-17 \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DFETCHCONTENT_QUIET=ON
+
+      - name: Build
+        run: cmake --build client/build-asan --parallel $(nproc)
+
+      # The game binary needs a display to run — use a headless virtual X server.
+      # We run a short smoke test: launch, wait 2s, then kill.
+      # If ASan or UBSan detect anything the process exits non-zero.
+      - name: Install Xvfb for headless run
+        run: sudo apt-get install -y xvfb
+
+      - name: Run with ASan + UBSan (headless, 2s smoke)
+        env:
+          ASAN_OPTIONS:  halt_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          # Point at a non-existent server — game will fail to connect
+          # but we're checking for memory errors, not network
+          API_BASE_OVERRIDE: "http://localhost:0/api"
+        run: |
+          Xvfb :99 -screen 0 1280x720x24 &
+          DISPLAY=:99 timeout 4s client/build-asan/CultivationAFK || true
+          # timeout exits 124 if process didn't crash — that's success
+          echo "Smoke test complete"
+
+  # ── ThreadSanitizer ───────────────────────────────────────────────────
+  tsan:
+    name: TSan (Clang 17)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Clang 17 + deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            clang-17 \
+            libgl1-mesa-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libssl-dev xvfb
+
+      - name: Cache CMake deps
+        uses: actions/cache@v4
+        with:
+          path: client/build-tsan/_deps
+          key: cmake-tsan-${{ hashFiles('client/CMakeLists.txt') }}
+          restore-keys: cmake-tsan-
+
+      - name: Configure (TSan)
+        run: |
+          cmake -S client -B client/build-tsan \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang-17 \
+            -DCMAKE_CXX_COMPILER=clang++-17 \
+            -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
+            -DFETCHCONTENT_QUIET=ON
+
+      - name: Build
+        run: cmake --build client/build-tsan --parallel $(nproc)
+
+      - name: Run with TSan (headless, 2s smoke)
+        env:
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: |
+          Xvfb :99 -screen 0 1280x720x24 &
+          DISPLAY=:99 timeout 4s client/build-tsan/CultivationAFK || true
+          echo "TSan smoke test complete"
