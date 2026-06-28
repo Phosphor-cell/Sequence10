@@ -1,4 +1,60 @@
 {
-  "buildCommand": "npm install",
-  "framework": "nextjs"
+  "version": 2,
+  "buildCommand": "npm install && npm run build",
+  "framework": "other",
+  "nodejs": "20.x",
+  "regions": ["iad1", "sfo1"],
+  "env": {
+    "NODE_ENV": "production"
+  },
+  "functions": {
+    "api/player.ts": {
+      "maxDuration": 30,
+      "memory": 512,
+      "runtime": "nodejs20.x"
+    },
+    "api/battle.ts": {
+      "maxDuration": 30,
+      "memory": 512,
+      "runtime": "nodejs20.x"
+    },
+    "api/loot.ts": {
+      "maxDuration": 30,
+      "memory": 512,
+      "runtime": "nodejs20.x"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/player",
+      "destination": "/api/player.ts"
+    },
+    {
+      "source": "/api/battle",
+      "destination": "/api/battle.ts"
+    },
+    {
+      "source": "/api/loot",
+      "destination": "/api/loot.ts"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET,POST,OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type"
+        }
+      ]
+    }
+  ]
 }
