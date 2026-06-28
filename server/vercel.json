@@ -1,29 +1,31 @@
 {
   "buildCommand": "npm install",
   "framework": "other",
+  "regions": ["iad1"],
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/$1"
+      "source": "/api/_player",
+      "destination": "/api/_mock_player"
+    },
+    {
+      "source": "/api/_battle",
+      "destination": "/api/_mock_battle"
+    },
+    {
+      "source": "/api/_loot",
+      "destination": "/api/_mock_loot"
     }
   ],
-  "regions": [
-    "iad1"
-  ],
   "functions": {
-    "api/_player.ts": {
+    "api/_mock_player.ts": {
       "maxDuration": 30,
       "memory": 512
     },
-    "api/_battle.ts": {
+    "api/_mock_battle.ts": {
       "maxDuration": 30,
       "memory": 512
     },
-    "api/_loot.ts": {
-      "maxDuration": 30,
-      "memory": 512
-    },
-    "api/_ai.ts": {
+    "api/_mock_loot.ts": {
       "maxDuration": 30,
       "memory": 512
     }
