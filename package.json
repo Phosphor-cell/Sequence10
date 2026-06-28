@@ -1,0 +1,23 @@
+{
+  "name": "infinite-afk-rpg-backend",
+  "version": "1.0.0",
+  "description": "Cloud-authoritative backend for Infinite AFK RPG",
+  "main": "api/_battle.ts",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel deploy --prod",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.9.0",
+    "@vercel/node": "^3.0.0",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}

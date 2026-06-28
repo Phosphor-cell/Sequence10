@@ -1,45 +1,233 @@
+// config/game_master.json
+// Optimized for: Native C++ client + Hybrid AI (procedural + LLM)
+// Architecture: uint32 stats, SVG assembly, decision-branching narrative
+
 {
   "meta": {
-    "version": "1.0.0",
-    "title": "Cultivation AFK Realm: Divine Descent",
-    "description": "Unified 32-bit Architecture with SVG Assembly & 20-Class Divine Summoning."
+    "version": "15.1.0",
+    "engine": "PostgreSQL_Native_C++",
+    "db_schema_version": "2.0",
+    "target_platforms": ["Windows_x64", "macOS_arm64", "Linux_x64", "Android_arm64", "Web_Optional"],
+    "note": "All generation uses hybrid approach: procedural baseline + LLM enhancement"
   },
-  "global_config": {
+
+  "physics": {
     "stat_architecture": "uint32",
     "absolute_cap": 4294967295,
     "canvas_res": 512,
-    "shattered_realms_active": true,
-    "database_constraints": {
-      "bloodline_max": 120,
-      "soul_max": 120,
-      "ai_directive": "Hard-cap enforcement. Reuse existing registries if count >= 120."
-    }
+    "int32_display_cap": 2147483647,
+    "int64_background": true,
+    "note": "Display as Int32, calculate as Int64 for damage/scaling"
   },
-  "summoning_engine": {
+
+  "summoning": {
     "class_registry": {
       "mortal": ["Spearman", "Archer", "Swordsman", "Scout", "Herbalist", "Assassin", "Mage", "Priest", "Mercenary", "Trapper"],
       "heroic": ["Paladin", "Spellblade", "Shadow-Dancer", "Beast-Master", "Sage"],
       "angelic": ["Seraph", "Cherub", "Virtue", "Dominion", "Archangel"],
       "divine": ["Creator", "Void-God", "Time-Weaver", "Life-Bringer", "Entropy"]
     },
+    "summon_generation": {
+      "method": "Hybrid_Procedural_LLM",
+      "procedural_baseline": {
+        "stats": "Random uint32 within tier range",
+        "abilities": "Database lookup + seed-based selection",
+        "sprite": "SVG assembly from component registry"
+      },
+      "llm_enhancement": {
+        "trigger": "On summon pull (real-time)",
+        "api": ["Groq_Mixtral", "Cerebras_Fallback", "Gemini_Fallback"],
+        "generates": ["Personality", "Lore_snippet", "Unique_trait_name"],
+        "cache": "Store results by class+seed to avoid recompute",
+        "timeout": "2s (fallback to procedural if timeout)"
+      },
+      "rarities": {
+        "Common": [0, 100000],
+        "Rare": [100000, 5000000],
+        "Epic": [5000000, 250000000],
+        "Legendary": [250000000, 4294967295]
+      }
+    },
     "inheritance_rules": {
-      "hero": { "rarity": "Anomalous", "traits": "1 God-Ability, 4 Elite" },
-      "angelic": { "rarity": "Monumental", "traits": "3 God-Abilities, 2 Common, 'Flight' Passive" },
+      "hero": { "rarity": "Anomalous", "traits": "1 God-Ability + 4 Elite" },
+      "angelic": { "rarity": "Monumental", "traits": "3 God-Abilities + 2 Common + Flight Passive" },
       "divine": { "rarity": "Impossible", "traits": "5 God-Abilities" }
     }
   },
+
+  "loot_generation": {
+    "method": "Procedural_Baseline_LLM_Flavor",
+    "procedural_baseline": {
+      "stats": "Random uint32 within tier range",
+      "rarity": "Roll-based on tier thresholds",
+      "armor_type": "Database lookup (sword, helm, chest, etc)",
+      "svg_assembly": "Deterministic based on seed (blade_id + hilt_id + rune_id + colors)"
+    },
+    "llm_enhancement": {
+      "trigger": "Batch job (every 6 hours) OR real-time if player requests inspect",
+      "api": "Cerebras (free tier, batch)",
+      "generates": ["Item_name", "Flavor_text", "Special_property_description"],
+      "cache": "Store by item_seed to avoid regenerating same loot",
+      "cost": "~0.1 tokens per item, ~600k items/month free"
+    },
+    "tiers": {
+      "Mundane": { "range": [10, 500], "ai_flavored": false },
+      "Notable": { "range": [500, 5000], "ai_flavored": false },
+      "Exemplary": { "range": [5000, 100000], "ai_flavored": "batch_only" },
+      "Anomalous": { "range": [100000, 5000000], "ai_flavored": "batch_only" },
+      "Monumental": { "range": [5000000, 250000000], "ai_flavored": "realtime_inspect" },
+      "Impossible": { "range": [250000000, 4294967295], "ai_flavored": "realtime_inspect" }
+    }
+  },
+
+  "shatter_bosses": {
+    "method": "Procedural_Scaled_LLM_Abilities",
+    "procedural_baseline": {
+      "hp": "base_hp * (15.5 + level_multiplier)",
+      "damage": "base_dmg * (2.2 + level_multiplier)",
+      "crit": "Random uint32 in range",
+      "sprite": "SVG assembly from boss_component_registry"
+    },
+    "llm_enhancement": {
+      "trigger": "Real-time (critical, slow path acceptable)",
+      "api": "Groq (fast generation, 5s acceptable)",
+      "generates": ["Boss_name", "Boss_lore", "Ability_descriptions", "Phase_mechanics"],
+      "ability_schema": {
+        "ability_name": "string (LLM generated)",
+        "damage_mult": "float (procedural)",
+        "cooldown": "uint32 (procedural)",
+        "description": "string (LLM generated)",
+        "visual_effect": "SVG_reference (procedural)"
+      },
+      "cataclysm_override": {
+        "reality_shatter_strike_chance": 0.015,
+        "void_evasion_chance": 0.03,
+        "descriptions": "LLM generates flavor for these mechanics"
+      }
+    }
+  },
+
+  "limited_events": {
+    "method": "Batch_LLM_Generation",
+    "schedule": "Generate daily via background job",
+    "procedural_baseline": {
+      "event_type": ["Boss_Rush", "Item_Gacha", "Limited_Story", "Void_Incursion"],
+      "rewards": "Random uint32 loot pool",
+      "duration": "Fixed (6h, 12h, 24h, 3d)"
+    },
+    "llm_enhancement": {
+      "trigger": "Batch job every 24h (e.g., 2 AM UTC)",
+      "api": "Cerebras (batch, super cheap)",
+      "generates": ["Event_name", "Event_story", "Boss_description", "Reward_flavor"],
+      "schema": {
+        "event_id": "string",
+        "event_name": "LLM generated",
+        "event_story": "LLM generated (2-3 paragraphs)",
+        "boss_name": "LLM generated",
+        "boss_lore": "LLM generated",
+        "rewards": [{"item_seed": "uint32", "rarity": "enum"}],
+        "duration_seconds": "uint32",
+        "start_time": "uint64",
+        "end_time": "uint64"
+      },
+      "cost": "~5 tokens per event, 30 events/month = 150 tokens (~$0.001)"
+    }
+  },
+
+  "limited_items": {
+    "method": "Batch_LLM_Generation",
+    "schedule": "Generate daily, 3-5 unique items",
+    "procedural_baseline": {
+      "stats": "Random uint32 within tier range",
+      "rarity": "Weighted toward Monumental/Impossible",
+      "svg_assembly": "Procedural from component registry"
+    },
+    "llm_enhancement": {
+      "trigger": "Batch job (daily, e.g., 3 AM UTC)",
+      "api": "Cerebras batch",
+      "generates": ["Item_name", "Flavor_text", "Unique_property_description"],
+      "availability": "24h or 72h window",
+      "cost": "~3-5 tokens per item, 5 items/day = 150 tokens/month (~$0.001)"
+    }
+  },
+
+  "narrative_engine": {
+    "method": "Decision_Branching_LLM_Generation",
+    "chapter_1": {
+      "type": "Static",
+      "paths": 4,
+      "decision_points": [
+        {
+          "id": "ch1_decision_1",
+          "text": "A stranger offers you power. Do you accept?",
+          "choices": ["Yes", "No", "Ask_More", "Refuse_Violently"],
+          "consequences": {
+            "Yes": { "branch": "ch2_power_path", "stats_mod": "+100 ATK, +50 DEF", "alignment": "Ambitious" },
+            "No": { "branch": "ch2_humble_path", "stats_mod": "+50 SPD", "alignment": "Cautious" },
+            "Ask_More": { "branch": "ch2_cunning_path", "stats_mod": "+75 INT", "alignment": "Clever" },
+            "Refuse_Violently": { "branch": "ch2_rebel_path", "stats_mod": "+200 ATK, -50 DEF", "alignment": "Defiant" }
+          }
+        }
+      ]
+    },
+    "chapter_generation": {
+      "method": "LLM_Dynamic",
+      "trigger": "When player completes decision point in previous chapter",
+      "api": "Groq or Cerebras (real-time, 5-10s acceptable)",
+      "input_prompt": {
+        "previous_chapter": "Stored narrative",
+        "player_choice": "Decision made",
+        "player_alignment": "Accumulated from choices",
+        "player_stats": "Current stats",
+        "world_state": "Available context"
+      },
+      "output_schema": {
+        "chapter_id": "string",
+        "chapter_number": "uint32",
+        "narrative": "Markdown (2000-3000 words)",
+        "new_decisions": [
+          {
+            "id": "string",
+            "text": "string",
+            "choices": ["string"],
+            "consequences": {}
+          }
+        ],
+        "enemies_encountered": ["array of summon classes"],
+        "rewards": [{"item_seed": "uint32", "rarity": "enum"}],
+        "new_mechanics_unlocked": ["array of feature strings"]
+      },
+      "caching": "Store generated chapters by (alignment, path, player_stats_hash) to avoid regeneration"
+    }
+  },
+
   "svg_assembly_engine": {
     "canvas_size": 512,
     "shading_mode": "multi-layered-gradient",
-    "layer_order": ["hilt", "blade", "rune"],
+    "layer_order": ["base", "hilt", "blade", "rune", "glow"],
     "component_registry": {
       "blades": "lib/blades.json",
       "hilts": "lib/hilts.json",
-      "runes": "lib/runes.json"
+      "runes": "lib/runes.json",
+      "boss_components": "lib/boss_bodies.json",
+      "armor_bases": "lib/armor_bases.json"
+    },
+    "seeding": {
+      "method": "Deterministic (seed-based)",
+      "seed_input": "item_id + rarity + class",
+      "output": "Consistent SVG assembly (same seed = same visual)"
     }
   },
+
   "combat_engine": {
     "damage_types": ["Slashing", "Blunt", "Piercing", "Fire", "Ice", "Lightning", "Poison", "Water", "Wind", "Hellfire", "Void", "Divine", "Entropy"],
+    "calculation": {
+      "damage_formula": "(attacker_attack - defender_defense/2) * crit_multiplier",
+      "crit_chance": "attacker_crit_rate / 100",
+      "crit_damage": "damage * (attacker_crit_damage / 100)",
+      "background_calc": "uint64_t (prevent overflow)",
+      "display": "capped at int32 max"
+    },
     "endgame_cap": {
       "god_mode_threshold": 4080218930,
       "max_boss_ehp": 16000000000,
@@ -49,26 +237,118 @@
       }
     }
   },
-  "armor_set_engine": {
-    "roll_tiers": {
-      "Mundane": [10, 500], "Notable": [500, 5000], "Exemplary": [5000, 100000],
-      "Anomalous": [100000, 5000000], "Monumental": [5000000, 250000000], "Impossible": [250000000, 4294967295]
+
+  "bloodline_soul_system": {
+    "bloodline_max": 120,
+    "soul_max": 120,
+    "ai_directive": "Hard-cap enforcement. Reuse existing registries if count >= 120.",
+    "pure_bloodlines": "Database registry (tier 1-21)",
+    "corrupted_bloodlines": "Database registry (tier 1-21)"
+  },
+
+  "infrastructure": {
+    "database": {
+      "primary": "Neon PostgreSQL",
+      "size_estimate": "500 MB - 2 GB (caching LLM outputs)",
+      "tables": [
+        "players",
+        "summoned_heroes",
+        "inventory_loot",
+        "narrative_branches (chapters, decisions)",
+        "llm_generation_cache (avoid recomputing)",
+        "boss_registry",
+        "event_registry",
+        "limited_items"
+      ]
+    },
+    "backend": {
+      "primary": "Vercel Functions (TypeScript)",
+      "endpoints": [
+        "POST /battle - Turn-based resolution",
+        "POST /summon - Procedural + LLM pull",
+        "POST /generate_event - Batch job trigger",
+        "POST /generate_chapter - Real-time narrative",
+        "POST /generate_boss - Real-time shatter boss",
+        "POST /generate_loot - Batch or inspect",
+        "GET /chapter/{id} - Retrieve narrative"
+      ],
+      "batch_jobs": "Vercel Cron (daily at fixed times)"
+    },
+    "client": {
+      "primary": "Native C++ (Raylib)",
+      "platforms": ["Windows", "macOS", "Linux", "Android (via NDK)"],
+      "secondary": "Web (React/Next.js optional)",
+      "networking": "HTTP via cpr library"
+    },
+    "ai_apis": {
+      "cerebras": {
+        "tier": "Free (1M tokens/month)",
+        "use": "Batch loot naming, batch events, batch items",
+        "speed": "Fast, but batch-friendly"
+      },
+      "groq": {
+        "tier": "Free (unlimited, rate-limited)",
+        "use": "Real-time story chapters, real-time boss generation",
+        "speed": "Very fast (100+ tokens/sec)"
+      },
+      "gemini": {
+        "tier": "Free (15 req/min)",
+        "use": "Fallback for real-time if Groq down",
+        "speed": "Slower, but available"
+      }
     }
   },
-  "trait_registries": {
-    "pure_bloodlines": [{"id": "b1", "name": "Iron-Will", "tier": 1}, {"id": "b21", "name": "Reality-Anchor", "tier": 21}],
-    "corrupted_bloodlines": [{"id": "cb1", "name": "Rot-Blood", "tier": 1}, {"id": "cb21", "name": "The Original Sin", "tier": 21}]
-  },
-  "ai_generation_schemas": {
-    "entity_schema": {
-      "origin": "string_from_class_registry",
-      "stats": "uint32",
-      "svg_assembly": {
-        "blade_id": "string",
-        "hilt_id": "string",
-        "rune_id": "string",
-        "colors": ["primary", "accent", "glow"]
-      }
+
+  "generation_pipelines": {
+    "pull_summon": {
+      "procedure": [
+        "1. Procedural: Roll class, tier, stats (uint32 random)",
+        "2. Procedural: Assemble SVG from component registry",
+        "3. Real-time LLM (Groq, 2s timeout): Generate personality + lore",
+        "4. Cache: Store by (class, tier, seed) to avoid recompute",
+        "5. Return: Complete summon object to player"
+      ],
+      "cost": "Procedural only cost if Groq timeout, LLM ~0.5 tokens per pull"
+    },
+    "generate_loot": {
+      "procedure": [
+        "1. Procedural: Roll stats, rarity, armor_type",
+        "2. Procedural: Assemble SVG",
+        "3. Batch LLM: Generate name + flavor (daily batch job)",
+        "4. Real-time LLM (inspect): If player clicks 'inspect', fetch cached LLM text or generate real-time",
+        "5. Return: Loot with procedural stats + LLM flavor"
+      ],
+      "cost": "Procedural only for loot generation, LLM only on inspect/batch"
+    },
+    "generate_shatter_boss": {
+      "procedure": [
+        "1. Procedural: Roll base HP/damage, scale with level_multiplier",
+        "2. Real-time LLM (Groq, 5s timeout): Generate boss name, lore, ability descriptions",
+        "3. Procedural: Generate ability cooldowns, damage multipliers",
+        "4. Cache: Store by (boss_seed, level) to avoid recompute",
+        "5. Return: Complete boss object with LLM narrative"
+      ],
+      "cost": "Real-time LLM ~2-3 tokens per boss"
+    },
+    "generate_event": {
+      "procedure": [
+        "1. Batch job (daily, 2 AM UTC)",
+        "2. Procedural: Roll event type, rewards",
+        "3. Batch LLM (Cerebras): Generate event name, story, boss description",
+        "4. Store in database",
+        "5. Client fetches at login"
+      ],
+      "cost": "~5 tokens per event, 30 events/month = $0.0015"
+    },
+    "generate_chapter": {
+      "procedure": [
+        "1. Player makes decision in Chapter N",
+        "2. Real-time LLM (Groq, 10s timeout): Generate Chapter N+1 narrative",
+        "3. Parse output: Extract decisions, rewards, new mechanics",
+        "4. Cache: Store by (decision_path, alignment, stats_hash)",
+        "5. Present Chapter N+1 to player"
+      ],
+      "cost": "Real-time LLM ~4-5 tokens per chapter"
     }
   }
 }
