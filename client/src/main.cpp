@@ -113,7 +113,7 @@ static json apiPost(const std::string& endpoint, const json& body) {
 }
 
 static void initPlayer(const std::string& username) {
-    auto res = apiPost("_player", {{"action","init"},{"username",username}});
+    auto res = apiPost("player", {{"action","init"},{"username",username}});
     if (res.contains("playerId")) {
         g_player.id       = res.value("playerId", std::string(""));
         g_player.username = res.value("username", username);
@@ -122,7 +122,7 @@ static void initPlayer(const std::string& username) {
 
 static void syncPlayer() {
     if (g_player.id.empty()) return;
-    auto res = apiPost("_player", {{"action","getState"},{"playerId",g_player.id}});
+    auto res = apiPost("player", {{"action","getState"},{"playerId",g_player.id}});
     if (!res.contains("level")) return;
 
     g_player.level = res["level"];
@@ -144,7 +144,7 @@ static void syncPlayer() {
 
 static void requestLoot() {
     if (g_player.id.empty()) return;
-    auto res = apiPost("_loot", {{"player_id", g_player.id}});
+    auto res = apiPost("loot", {{"player_id", g_player.id}});
 
     g_battle.lastLoot = LootDrop{};
     g_battle.lastLoot.dropped = res.value("dropped", false);
@@ -174,7 +174,7 @@ static void requestLoot() {
 
 static void startBattle() {
     if (g_player.id.empty() || g_battle.active) return;
-    auto res = apiPost("_battle", {
+    auto res = apiPost("battle", {
         {"playerId",   g_player.id},
         {"enemyLevel", g_player.level},
         {"difficulty", 1}
