@@ -2,7 +2,6 @@
   "version": 2,
   "buildCommand": "npm install && npm run build",
   "framework": "other",
-  "nodejs": "20.x",
   "regions": ["iad1", "sfo1"],
   "env": {
     "NODE_ENV": "production"
