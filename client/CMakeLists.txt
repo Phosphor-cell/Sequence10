@@ -68,6 +68,21 @@ target_include_directories(CultivationAFK PRIVATE
     ${CMAKE_SOURCE_DIR}/src
 )
 
+# ── Windows: prevent Win32 header functions clashing with Raylib ───────
+if(WIN32)
+    target_compile_definitions(CultivationAFK PRIVATE
+        NOGDI           # removes GDI DrawText
+        NOUSER          # removes USER CloseWindow / ShowCursor
+        NOMINMAX        # removes min/max macros
+        WIN32_LEAN_AND_MEAN
+        VC_EXTRA_LEAN
+    )
+    # Also patch raylib itself so its own includes don't re-add them
+    target_compile_definitions(raylib PRIVATE
+        NOGDI NOUSER NOMINMAX WIN32_LEAN_AND_MEAN
+    )
+endif()
+
 target_link_libraries(CultivationAFK PRIVATE
     raylib
     cpr::cpr

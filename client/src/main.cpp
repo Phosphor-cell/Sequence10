@@ -14,7 +14,7 @@
 using json = nlohmann::json;
 
 // ─── Config ────────────────────────────────────────────────────────────
-const char*  API_BASE      = "https://sequence10.vercel.app//api";
+const char*  API_BASE      = "https://your-vercel-project.vercel.app/api";
 const int    SCREEN_WIDTH  = 1280;
 const int    SCREEN_HEIGHT = 720;
 const float  SYNC_INTERVAL = 5.0f;   // seconds between background syncs
