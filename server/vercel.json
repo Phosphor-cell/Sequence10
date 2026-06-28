@@ -1,3 +1,4 @@
 {
-  "framework": "other"
+  "buildCommand": "npm install",
+  "framework": "nextjs"
 }
