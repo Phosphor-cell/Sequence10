@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "npm install",
+  "outputDirectory": "public",
   "functions": {
     "api/player.ts": { "maxDuration": 30, "memory": 512 },
     "api/battle.ts": { "maxDuration": 30, "memory": 512 },

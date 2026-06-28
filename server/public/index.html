@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sequence10 API</title>
+  <style>
+    body {
+      font-family: -apple-system, system-ui, sans-serif;
+      background: #0c0c14;
+      color: #e0e0f0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .card {
+      background: #16161f;
+      border: 1px solid #2a2a3a;
+      border-radius: 12px;
+      padding: 40px;
+      max-width: 480px;
+    }
+    h1 { color: #9c88ff; margin-top: 0; }
+    code {
+      background: #0c0c14;
+      padding: 2px 8px;
+      border-radius: 4px;
+      color: #7dd3fc;
+    }
+    .endpoint { margin: 12px 0; }
+    .status { color: #4ade80; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Sequence10 API</h1>
+    <p class="status">● Online</p>
+    <p>Backend for Cultivation AFK Realm: Divine Descent.</p>
+    <p>Available endpoints:</p>
+    <div class="endpoint"><code>POST /api/player</code> — player init & state</div>
+    <div class="endpoint"><code>POST /api/battle</code> — battle resolution</div>
+    <div class="endpoint"><code>POST /api/loot</code> — loot drops</div>
+  </div>
+</body>
+</html>
