@@ -1,5 +1,5 @@
 'use strict';
-const { generateLoot, RARITIES, ARMOR_KEYS } = require('./loot.js');
+const { generateLoot, RARITIES, ARMOR_KEYS } = require('../../loot.js');
 
 let pass = 0, fail = 0;
 function check(name, cond, detail='') {

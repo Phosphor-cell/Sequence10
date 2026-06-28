@@ -1,0 +1,11 @@
+# Never commit local secrets
+.env
+.env.local
+.env.*.local
+
+# Vercel local dev cache
+.vercel/
+
+# Build output
+node_modules/
+*.js.map

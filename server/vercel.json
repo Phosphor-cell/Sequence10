@@ -1,28 +1,29 @@
 {
   "buildCommand": "npm install",
-  "devCommand": "vercel dev",
-  "outputDirectory": "./api",
   "framework": "other",
-  "env": [
-    {
-      "key": "DATABASE_URL",
-      "value": "postgresql://user:password@localhost/infinite_afk",
-      "target": ["development", "preview", "production"]
-    }
-  ],
   "rewrites": [
     {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     }
   ],
-  "regions": ["sfo1"],
+  "regions": [
+    "iad1"
+  ],
   "functions": {
+    "api/_player.ts": {
+      "maxDuration": 30,
+      "memory": 512
+    },
     "api/_battle.ts": {
       "maxDuration": 30,
       "memory": 512
     },
-    "api/_player.ts": {
+    "api/_loot.ts": {
+      "maxDuration": 30,
+      "memory": 512
+    },
+    "api/_ai.ts": {
       "maxDuration": 30,
       "memory": 512
     }
