@@ -2,9 +2,10 @@
   "name": "infinite-afk-rpg-backend",
   "version": "1.0.0",
   "description": "Cloud-authoritative backend for Infinite AFK RPG",
-  "main": "api/_battle.ts",
+  "main": "api/battle.ts",
   "scripts": {
     "dev": "vercel dev",
+    "build": "tsc --noEmit",
     "deploy": "vercel deploy --prod",
     "test": "jest"
   },
@@ -14,10 +15,10 @@
     "pg": "^8.11.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^24.0.0",
     "typescript": "^5.0.0"
   },
   "engines": {
-    "node": "18.x"
+    "node": "24.x"
   }
 }
