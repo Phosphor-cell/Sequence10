@@ -9,6 +9,18 @@ function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// Weighted rarity for LOOT drops (loot is frequent, so the top tier is rarer
+// than in paid summons). Common 60 / Uncommon 25 / Rare 10 / Epic 4 / Legendary 1.
+function weightedRarity(): string {
+  const weights = [0.60, 0.25, 0.10, 0.04, 0.01];
+  let roll = Math.random();
+  for (let i = 0; i < weights.length; i++) {
+    if (roll < weights[i]) return rarities[i];
+    roll -= weights[i];
+  }
+  return rarities[0];
+}
+
 export default async (req: VercelRequest, res: VercelResponse) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -23,7 +35,7 @@ export default async (req: VercelRequest, res: VercelResponse) => {
     return res.status(200).json({ dropped: false });
   }
 
-  const rarity = rarities[randomInt(0, 4)];
+  const rarity = weightedRarity();
   const armorType = armorTypes[randomInt(0, 5)];
 
   return res.status(200).json({

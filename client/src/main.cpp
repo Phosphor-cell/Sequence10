@@ -41,7 +41,7 @@ const float  SYNC_INTERVAL = 5.0f;
 
 // ─── Screens ───────────────────────────────────────────────────────────
 enum class Screen {
-    HOME, CHAPTER_SELECT, BATTLE, SHOP, INVENTORY, SUMMON, INDEX, STORY
+    HOME, CHAPTER_SELECT, BATTLE, SHOP, INVENTORY, SUMMON, INDEX, STORY, HEROES, TEAM
 };
 
 // ─── Data structures ───────────────────────────────────────────────────
@@ -112,6 +112,17 @@ static bool      g_idlePopup = false;
 static uint64_t  g_idleGold = 0, g_idleExp = 0;
 static long long g_idleSeconds = 0;
 
+// ─── Hero roster + teams ───────────────────────────────────────────────
+struct Hero {
+    std::string id, className, tier, rarity, alignment, element;
+    int health = 0, attack = 0, defense = 0;
+};
+static std::vector<Hero> g_heroes;          // owned roster
+static int  g_heroTab = 0;                  // 0=All 1=Medieval 2=XianxiaN 3=XianxiaH 4=VictorianN 5=VictorianH
+static std::string g_teamSlots[5];          // hero ids in the active team (by position)
+static int  g_teamPickPos = -1;             // which team slot we're assigning, -1 = none
+static bool g_heroesFetched = false;
+
 // ─── Colour palette ────────────────────────────────────────────────────
 namespace Col {
     const Color C_BG_DEEP  = { 10, 10, 18, 255 };
@@ -143,6 +154,60 @@ static Color rarityColor(const std::string& r) {
     if (r == "Epic")      return { 156,  39, 176, 255 };
     if (r == "Legendary") return { 255, 193,   7, 255 };
     return { 158, 158, 158, 255 };
+}
+
+// ─── Hero sprite cache (graceful: art appears when the file exists) ─────
+// Looks for assets/heroes/<classname>.png (lowercased, spaces/hyphens kept as
+// a slug). If found, caches and returns the texture; otherwise returns a
+// 0-id texture and the UI falls back to the colored card. This lets you drop
+// in Leonardo art one class at a time — present classes show their sprite,
+// missing ones (e.g. tiers 4-5 not generated yet) keep the placeholder card.
+static std::map<std::string, Texture2D> g_heroSprites;   // className -> texture
+static std::map<std::string, bool>      g_heroSpriteTried;
+
+static std::string classSlug(const std::string& className) {
+    std::string s;
+    for (char c : className) {
+        if (c == ' ') s += '_';
+        else s += (char)tolower((unsigned char)c);
+    }
+    return s; // "Shadow-Dancer" -> "shadow-dancer", "Beast-Master" -> "beast-master"
+}
+
+// Returns a sprite texture for the class, or {0} if none exists yet.
+static Texture2D heroSprite(const std::string& className) {
+    auto it = g_heroSprites.find(className);
+    if (it != g_heroSprites.end()) return it->second;
+    if (g_heroSpriteTried[className]) return Texture2D{ 0 };
+    g_heroSpriteTried[className] = true;
+
+    std::string slug = classSlug(className);
+    const std::string candidates[] = {
+        "assets/heroes/" + slug + ".png",
+        "assets/heroes/" + slug + ".jpg",
+    };
+    for (const auto& path : candidates) {
+        if (FileExists(path.c_str())) {
+            Texture2D t = LoadTexture(path.c_str());
+            if (t.id != 0) {
+                SetTextureFilter(t, TEXTURE_FILTER_BILINEAR);
+                g_heroSprites[className] = t;
+                return t;
+            }
+        }
+    }
+    return Texture2D{ 0 };
+}
+
+// draw a hero sprite fitted into a box, or return false if no art exists.
+static bool drawHeroSprite(const std::string& className, Rectangle box) {
+    Texture2D t = heroSprite(className);
+    if (t.id == 0) return false;
+    float scale = std::min(box.width / t.width, box.height / t.height);
+    float w = t.width * scale, h = t.height * scale;
+    float ox = box.x + (box.width - w) / 2, oy = box.y + (box.height - h) / 2;
+    DrawTextureEx(t, { ox, oy }, 0.0f, scale, WHITE);
+    return true;
 }
 
 // ─── UI primitives ─────────────────────────────────────────────────────
@@ -269,10 +334,14 @@ static Texture2D getChapterBackdrop(Chapter& c) {
             if (t.id != 0) {
                 SetTextureFilter(t, TEXTURE_FILTER_BILINEAR);
                 c.backdrop = t;
+                TraceLog(LOG_INFO, "Backdrop loaded: %s", path.c_str());
                 return c.backdrop;
             }
         }
     }
+    // Nothing matched — log what we tried so this isn't a silent failure.
+    TraceLog(LOG_WARNING, "Backdrop NOT found for chapter %d (cwd=%s). Tried: %s",
+             c.id, GetWorkingDirectory(), candidates[0].c_str());
     return c.backdrop;
 }
 
@@ -340,6 +409,60 @@ static void claimIdle() {
         g_player.exp  += g_idleExp;
         g_idlePopup = true;
     }
+}
+
+// ─── Hero/team networking ──────────────────────────────────────────────
+static void fetchHeroes() {
+    if (g_player.id.empty()) return;
+    auto res = apiPost("heroes", { { "playerId", g_player.id }, { "action", "list" } });
+    g_heroes.clear();
+    if (res.contains("heroes") && res["heroes"].is_array()) {
+        for (auto& h : res["heroes"]) {
+            Hero hero;
+            hero.id        = h.value("id", std::string(""));
+            hero.className = h.value("class_name", std::string("Unknown"));
+            hero.tier      = h.value("tier", std::string("mortal"));
+            hero.rarity    = h.value("rarity", std::string("Common"));
+            hero.alignment = h.value("alignment", std::string("neutral"));
+            hero.element   = h.value("element", std::string("neutral"));
+            hero.health    = h.value("health", 0);
+            hero.attack    = h.value("attack", 0);
+            hero.defense   = h.value("defense", 0);
+            g_heroes.push_back(hero);
+        }
+    }
+    g_heroesFetched = true;
+}
+
+static void summonHeroes(int count) {
+    if (g_player.id.empty()) return;
+    auto res = apiPost("heroes", { { "playerId", g_player.id }, { "action", "summon" }, { "count", count } });
+    if (res.contains("summoned")) {
+        int n = (int)res["summoned"].size();
+        appendStory("Summoned " + std::to_string(n) + " hero(es).");
+        fetchHeroes();   // refresh roster
+    }
+}
+
+static void loadActiveTeam() {
+    if (g_player.id.empty()) return;
+    auto res = apiPost("team", { { "playerId", g_player.id }, { "action", "get" }, { "slot", 0 } });
+    for (int i = 0; i < 5; i++) g_teamSlots[i].clear();
+    if (res.contains("members") && res["members"].is_array()) {
+        for (auto& m : res["members"]) {
+            int pos = m.value("position", -1);
+            if (pos >= 0 && pos < 5) g_teamSlots[pos] = m.value("id", std::string(""));
+        }
+    }
+}
+
+static void saveActiveTeam() {
+    if (g_player.id.empty()) return;
+    json ids = json::array();
+    for (int i = 0; i < 5; i++) if (!g_teamSlots[i].empty()) ids.push_back(g_teamSlots[i]);
+    apiPost("team", { { "playerId", g_player.id }, { "action", "save" },
+                      { "slot", 0 }, { "name", "Main Team" }, { "heroIds", ids } });
+    apiPost("team", { { "playerId", g_player.id }, { "action", "setActive" }, { "slot", 0 } });
 }
 
 // Background sync: HTTP runs off-thread; result is applied on the main
@@ -453,18 +576,20 @@ static void drawTopBar() {
 static Button g_navStory   { { 0,0,0,0 }, "STORY" };
 static Button g_navShop    { { 0,0,0,0 }, "SHOP" };
 static Button g_navSummon  { { 0,0,0,0 }, "SUMMON" };
+static Button g_navHeroes  { { 0,0,0,0 }, "HEROES" };
 static Button g_navInv     { { 0,0,0,0 }, "INVENTORY" };
 static Button g_navIndex   { { 0,0,0,0 }, "INDEX" };
 static Button g_navChapters{ { 0,0,0,0 }, "QUEST" };
 
 static void layoutNav() {
-    float bw = 150, bh = 46, gap = 10;
+    float bw = 150, bh = 44, gap = 8;
     float x = SCREEN_WIDTH - bw - 18;
     float y = 60;
     g_navChapters.rect = { x, y, bw, bh }; y += bh + gap;
     g_navStory.rect    = { x, y, bw, bh }; y += bh + gap;
     g_navShop.rect     = { x, y, bw, bh }; y += bh + gap;
     g_navSummon.rect   = { x, y, bw, bh }; y += bh + gap;
+    g_navHeroes.rect   = { x, y, bw, bh }; y += bh + gap;
     g_navInv.rect      = { x, y, bw, bh }; y += bh + gap;
     g_navIndex.rect    = { x, y, bw, bh };
 }
@@ -537,6 +662,7 @@ static void drawHome(Vector2 mouse, bool clicked) {
     if (drawButton(g_navStory,    mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT_2)) g_screen = Screen::STORY;
     if (drawButton(g_navShop,     mouse, clicked, Col::C_PANEL_HI, Col::C_GOLD))     g_screen = Screen::SHOP;
     if (drawButton(g_navSummon,   mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT_2)) g_screen = Screen::SUMMON;
+    if (drawButton(g_navHeroes,   mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT_2)) { g_heroesFetched = false; g_screen = Screen::HEROES; }
     if (drawButton(g_navInv,      mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT))   g_screen = Screen::INVENTORY;
     if (drawButton(g_navIndex,    mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT_2)) g_screen = Screen::INDEX;
 
@@ -751,6 +877,164 @@ static void doSummon() {
     appendStory("Summoned: " + g_lastSummon);
 }
 
+// ─── HEROES (tabbed roster) ────────────────────────────────────────────
+static const char* HERO_TABS[]   = { "All", "Medieval", "Xianxia", "Corrupted", "Victorian", "Eldritch" };
+// maps each tab to the DB tier string it filters (tab 0 = All)
+static const char* TAB_TIER[]    = { "", "medieval", "xianxia_normal", "xianxia_horror", "victorian_normal", "victorian_horror" };
+static bool heroPassesTab(const Hero& h) {
+    if (g_heroTab == 0) return true;
+    return h.tier == TAB_TIER[g_heroTab];
+}
+
+static void drawHeroes(Vector2 mouse, bool clicked) {
+    drawBackdropCover({ 0 });
+    DrawRectangleGradientV(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, { 14, 14, 26, 220 }, { 6, 6, 14, 230 });
+    drawTopBar();
+    if (drawBack(mouse, clicked)) g_screen = Screen::HOME;
+
+    if (!g_heroesFetched) fetchHeroes();
+
+    DrawText("HEROES", SCREEN_WIDTH / 2 - 55, 64, 28, Col::C_ACCENT_2);
+
+    // Summon buttons (top right of content)
+    Rectangle s1 = { SCREEN_WIDTH - 230.f, 60, 100, 30 };
+    Rectangle s10 = { SCREEN_WIDTH - 120.f, 60, 100, 30 };
+    bool h1 = CheckCollisionPointRec(mouse, s1), h10 = CheckCollisionPointRec(mouse, s10);
+    DrawRectangleRec(s1, h1 ? Col::C_PANEL_HI : Col::C_PANEL); DrawRectangleLinesEx(s1, 1, Col::C_ACCENT_2);
+    DrawText("Summon x1", (int)s1.x + 10, (int)s1.y + 8, 13, Col::C_TXT);
+    DrawRectangleRec(s10, h10 ? Col::C_PANEL_HI : Col::C_PANEL); DrawRectangleLinesEx(s10, 1, Col::C_GOLD);
+    DrawText("Summon x10", (int)s10.x + 8, (int)s10.y + 8, 13, Col::C_GOLD);
+    if (clicked && h1)  summonHeroes(1);
+    if (clicked && h10) summonHeroes(10);
+
+    // Tabs
+    int tx = 40, ty = 104;
+    for (int i = 0; i < 6; i++) {
+        int tw = MeasureText(HERO_TABS[i], 14) + 24;
+        Rectangle tab = { (float)tx, (float)ty, (float)tw, 28 };
+        bool hov = CheckCollisionPointRec(mouse, tab);
+        bool sel = (g_heroTab == i);
+        DrawRectangleRec(tab, sel ? Col::C_ACCENT : (hov ? Col::C_PANEL_HI : Col::C_PANEL));
+        DrawText(HERO_TABS[i], tx + 12, ty + 7, 14, sel ? Col::C_BG_DEEP : Col::C_TXT);
+        if (clicked && hov) g_heroTab = i;
+        tx += tw + 6;
+    }
+
+    // Grid of hero cards (wider to fit a sprite thumbnail on the left)
+    int gx = 40, gy = 144, cw = 250, ch = 92, col = 0;
+    int perRow = (SCREEN_WIDTH - 80) / (cw + 12);
+    int shown = 0;
+    for (auto& h : g_heroes) {
+        if (!heroPassesTab(h)) continue;
+        int px = gx + col * (cw + 12);
+        int py = gy + (shown / perRow) * (ch + 12);
+        Rectangle card = { (float)px, (float)py, (float)cw, (float)ch };
+        if (py > SCREEN_HEIGHT - 60) break;
+        Color rc = rarityColor(h.rarity);
+        drawPanel(px, py, cw, ch);
+        DrawRectangleLinesEx(card, 2, rc);
+        // sprite thumbnail (left), or a rarity-tinted placeholder box if no art
+        Rectangle thumb = { (float)(px + 6), (float)(py + 6), 80, 80 };
+        if (!drawHeroSprite(h.className, thumb)) {
+            DrawRectangleRec(thumb, { rc.r, rc.g, rc.b, 40 });
+            DrawRectangleLinesEx(thumb, 1, rc);
+            // initial letter as a stand-in
+            std::string init(1, h.className.empty() ? '?' : h.className[0]);
+            DrawText(init.c_str(), (int)thumb.x + 30, (int)thumb.y + 26, 30, rc);
+        }
+        int textX = px + 96;
+        DrawText(h.className.c_str(), textX, py + 10, 16, Col::C_TXT);
+        DrawText(h.rarity.c_str(), textX, py + 30, 12, rc);
+        DrawText(TextFormat("ATK %d  DEF %d", h.attack, h.defense),
+                 textX, py + 50, 11, Col::C_TXT_DIM);
+        DrawText(TextFormat("%s / %s", h.alignment.c_str(), h.element.c_str()),
+                 textX, py + 68, 11, Col::C_ACCENT_2);
+        // click a card while assigning a team slot -> assign it
+        if (clicked && CheckCollisionPointRec(mouse, card) && g_teamPickPos >= 0) {
+            g_teamSlots[g_teamPickPos] = h.id;
+            g_teamPickPos = -1;
+            saveActiveTeam();
+            g_screen = Screen::TEAM;
+        }
+        shown++; col = shown % perRow;
+    }
+    if (shown == 0)
+        DrawText("No heroes yet. Summon to build your roster.", 40, gy, 15, Col::C_TXT_DIM);
+
+    // footer hint + go-to-team button
+    Rectangle teamBtn = { 40, (float)(SCREEN_HEIGHT - 46), 160, 32 };
+    bool tHov = CheckCollisionPointRec(mouse, teamBtn);
+    DrawRectangleRec(teamBtn, tHov ? Col::C_PANEL_HI : Col::C_PANEL);
+    DrawRectangleLinesEx(teamBtn, 1, Col::C_ACCENT);
+    DrawText("Manage Team", (int)teamBtn.x + 18, (int)teamBtn.y + 8, 15, Col::C_TXT);
+    if (clicked && tHov) { loadActiveTeam(); g_screen = Screen::TEAM; }
+}
+
+// ─── TEAM builder (5 slots) ────────────────────────────────────────────
+static const Hero* heroById(const std::string& id) {
+    for (auto& h : g_heroes) if (h.id == id) return &h;
+    return nullptr;
+}
+
+static void drawTeam(Vector2 mouse, bool clicked) {
+    drawBackdropCover({ 0 });
+    DrawRectangleGradientV(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, { 12, 16, 28, 220 }, { 6, 6, 14, 230 });
+    drawTopBar();
+    if (drawBack(mouse, clicked)) { g_teamPickPos = -1; g_screen = Screen::HEROES; }
+
+    DrawText("ACTIVE TEAM", SCREEN_WIDTH / 2 - 90, 64, 28, Col::C_ACCENT_2);
+    DrawText("Tap a slot, then pick a hero. Up to 5.", SCREEN_WIDTH / 2 - 150, 104, 13, Col::C_TXT_DIM);
+
+    // 5 slots in a row
+    int slotW = 180, slotH = 230, gap = 18;
+    int totalW = slotW * 5 + gap * 4;
+    int sx = (SCREEN_WIDTH - totalW) / 2, sy = 150;
+    for (int i = 0; i < 5; i++) {
+        int px = sx + i * (slotW + gap);
+        Rectangle slot = { (float)px, (float)sy, (float)slotW, (float)slotH };
+        bool hov = CheckCollisionPointRec(mouse, slot);
+        bool picking = (g_teamPickPos == i);
+        drawPanel(px, sy, slotW, slotH, picking ? Col::C_PANEL_HI : Col::C_PANEL);
+        DrawRectangleLinesEx(slot, picking ? 3 : 1, picking ? Col::C_GOLD : Col::C_BORDER);
+
+        const Hero* h = g_teamSlots[i].empty() ? nullptr : heroById(g_teamSlots[i]);
+        if (h) {
+            Color rc = rarityColor(h->rarity);
+            DrawText(TextFormat("Slot %d", i + 1), px + 12, sy + 8, 12, Col::C_TXT_DIM);
+            // sprite portrait at top of the slot (or tinted placeholder)
+            Rectangle port = { (float)(px + 12), (float)(sy + 26), (float)(slotW - 24), 96 };
+            if (!drawHeroSprite(h->className, port)) {
+                DrawRectangleRec(port, { rc.r, rc.g, rc.b, 35 });
+                DrawRectangleLinesEx(port, 1, rc);
+                std::string init(1, h->className.empty() ? '?' : h->className[0]);
+                DrawText(init.c_str(), (int)(port.x + port.width/2 - 12), (int)(port.y + 32), 40, rc);
+            }
+            DrawText(h->className.c_str(), px + 12, sy + 128, 16, Col::C_TXT);
+            DrawText(h->rarity.c_str(), px + 12, sy + 148, 12, rc);
+            DrawText(TextFormat("ATK %d  DEF %d", h->attack, h->defense), px + 12, sy + 168, 11, Col::C_TXT_DIM);
+            DrawText(TextFormat("%s / %s", h->alignment.c_str(), h->element.c_str()), px + 12, sy + 186, 11, Col::C_ACCENT_2);
+            // remove button
+            Rectangle rm = { (float)(px + slotW - 30), (float)(sy + 8), 22, 22 };
+            DrawRectangleRec(rm, Col::C_PANEL_HI); DrawText("x", (int)rm.x + 7, (int)rm.y + 4, 14, Col::C_TXT);
+            if (clicked && CheckCollisionPointRec(mouse, rm)) { g_teamSlots[i].clear(); saveActiveTeam(); }
+        } else {
+            DrawText(TextFormat("Slot %d", i + 1), px + 12, sy + 10, 12, Col::C_TXT_DIM);
+            DrawText("+ empty", px + slotW/2 - 30, sy + slotH/2 - 8, 16, Col::C_TXT_DIM);
+            if (clicked && hov) { g_teamPickPos = i; g_screen = Screen::HEROES; }
+        }
+        // clicking a filled slot re-assigns it
+        if (clicked && hov && h && !CheckCollisionPointRec(mouse, { (float)(px + slotW - 30), (float)(sy + 8), 22, 22 }))
+            { g_teamPickPos = i; g_screen = Screen::HEROES; }
+    }
+
+    // team summary (total power)
+    long long totalAtk = 0, totalHp = 0; int members = 0;
+    for (int i = 0; i < 5; i++) { const Hero* h = g_teamSlots[i].empty() ? nullptr : heroById(g_teamSlots[i]); if (h) { totalAtk += h->attack; totalHp += h->health; members++; } }
+    DrawText(TextFormat("Team Power:  %lld ATK   %lld HP   (%d/5 heroes)", totalAtk, totalHp, members),
+             sx, sy + slotH + 30, 16, Col::C_GOLD);
+}
+
+// ─── SUMMON ────────────────────────────────────────────────────────────
 static void drawSummon(Vector2 mouse, bool clicked) {
     drawBackdropCover({ 0 });
     DrawRectangleGradientV(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT,
@@ -759,8 +1043,7 @@ static void drawSummon(Vector2 mouse, bool clicked) {
     if (drawBack(mouse, clicked)) g_screen = Screen::HOME;
 
     DrawText("SUMMON", SCREEN_WIDTH / 2 - 60, 70, 30, Col::C_ACCENT_2);
-    DrawText("Channel resonance to call an ally. (Rates are placeholder.)",
-             SCREEN_WIDTH / 2 - 220, 110, 13, Col::C_TXT_DIM);
+    DrawText("Channel resonance to call an ally.", SCREEN_WIDTH / 2 - 160, 110, 13, Col::C_TXT_DIM);
 
     int ccx = SCREEN_WIDTH / 2, ccy = 330;
     DrawCircleLines(ccx, ccy, 120, Col::C_ACCENT_2);
@@ -776,8 +1059,8 @@ static void drawSummon(Vector2 mouse, bool clicked) {
 
     Button s1 { { (float)ccx - 220, 520, 200, 50 }, "SUMMON x1  (100 Gems)" };
     Button s10{ { (float)ccx + 20,  520, 200, 50 }, "SUMMON x10 (900 Gems)" };
-    if (drawButton(s1,  mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT))   doSummon();
-    if (drawButton(s10, mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT_2)) doSummon();
+    if (drawButton(s1,  mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT))   { summonHeroes(1);  g_summonFlash = 1.0f; }
+    if (drawButton(s10, mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT_2)) { summonHeroes(10); g_summonFlash = 1.0f; }
 }
 
 // ─── INDEX ─────────────────────────────────────────────────────────────
@@ -838,6 +1121,12 @@ int main(void) {
     SetTargetFPS(60);
     SetExitKey(0);
 
+    // Resolve assets relative to the executable, NOT the working directory.
+    // Without this, launching the game from Explorer / a shortcut / another
+    // folder makes "assets/..." paths fail and backdrops fall back to a
+    // blank gradient. ChangeDirectory fixes it for every launch method.
+    ChangeDirectory(GetApplicationDirectory());
+
     initPlayer("TestPlayer");
     fetchChapters();
     syncPlayer();
@@ -883,6 +1172,8 @@ int main(void) {
             case Screen::SHOP:           drawShop(mouse, clicked);          break;
             case Screen::INVENTORY:      drawInventory(mouse, clicked);     break;
             case Screen::SUMMON:         drawSummon(mouse, clicked);        break;
+            case Screen::HEROES:         drawHeroes(mouse, clicked);        break;
+            case Screen::TEAM:           drawTeam(mouse, clicked);          break;
             case Screen::INDEX:          drawIndex(mouse, clicked);         break;
             case Screen::STORY:          drawStory(mouse, clicked);         break;
         }
@@ -924,6 +1215,8 @@ int main(void) {
 
     for (auto& c : g_chapters)
         if (c.backdrop.id != 0) UnloadTexture(c.backdrop);
+    for (auto& kv : g_heroSprites)
+        if (kv.second.id != 0) UnloadTexture(kv.second);
     g_doll.unload();
     CloseWindow();
     return 0;
