@@ -1,0 +1,12 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- head -->
+  <circle cx="128" cy="56" r="26" fill="#E8C9A0" stroke="#3A2A1A" stroke-width="3"/>
+  <!-- torso -->
+  <path d="M98,84 L158,84 L150,168 L106,168 Z" fill="#C9B8E0" stroke="#3A2A4A" stroke-width="3"/>
+  <!-- arms -->
+  <rect x="78"  y="86" width="20" height="74" rx="9" fill="#E8C9A0" stroke="#3A2A1A" stroke-width="3"/>
+  <rect x="158" y="86" width="20" height="74" rx="9" fill="#E8C9A0" stroke="#3A2A1A" stroke-width="3"/>
+  <!-- legs -->
+  <rect x="106" y="168" width="20" height="64" rx="8" fill="#5A4A6A" stroke="#2A1A3A" stroke-width="3"/>
+  <rect x="130" y="168" width="20" height="64" rx="8" fill="#5A4A6A" stroke="#2A1A3A" stroke-width="3"/>
+</svg>

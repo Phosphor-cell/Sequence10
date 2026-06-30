@@ -43,8 +43,8 @@ CREATE TABLE players (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_players_username ON players(username);
-CREATE INDEX idx_players_created ON players(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_players_username ON players(username);
+CREATE INDEX IF NOT EXISTS idx_players_created ON players(created_at DESC);
 
 -- ============= CHARACTER STATS =============
 
@@ -79,7 +79,7 @@ CREATE TABLE equipment_slots (
   CHECK (slot_name IN ('head', 'body', 'arms', 'legs', 'weapon', 'accessory'))
 );
 
-CREATE INDEX idx_equipment_slots_player ON equipment_slots(player_id);
+CREATE INDEX IF NOT EXISTS idx_equipment_slots_player ON equipment_slots(player_id);
 
 -- ============= ITEMS =============
 
@@ -105,8 +105,8 @@ CREATE TABLE items (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_items_rarity ON items(rarity);
-CREATE INDEX idx_items_slot ON items(slot_name);
+CREATE INDEX IF NOT EXISTS idx_items_rarity ON items(rarity);
+CREATE INDEX IF NOT EXISTS idx_items_slot ON items(slot_name);
 
 -- ============= PLAYER INVENTORY =============
 
@@ -119,8 +119,8 @@ CREATE TABLE inventory (
   acquired_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_inventory_player ON inventory(player_id);
-CREATE INDEX idx_inventory_equipped ON inventory(player_id, equipped);
+CREATE INDEX IF NOT EXISTS idx_inventory_player ON inventory(player_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_equipped ON inventory(player_id, equipped);
 
 -- ============= SUMMONED HEROES =============
 
@@ -150,8 +150,8 @@ CREATE TABLE summoned_heroes (
   UNIQUE(player_id, seed)
 );
 
-CREATE INDEX idx_heroes_player ON summoned_heroes(player_id);
-CREATE INDEX idx_heroes_tier ON summoned_heroes(tier);
+CREATE INDEX IF NOT EXISTS idx_heroes_player ON summoned_heroes(player_id);
+CREATE INDEX IF NOT EXISTS idx_heroes_tier ON summoned_heroes(tier);
 
 -- ============= INVENTORY LOOT =============
 
@@ -181,8 +181,8 @@ CREATE TABLE inventory_loot (
   UNIQUE(player_id, seed)
 );
 
-CREATE INDEX idx_loot_player ON inventory_loot(player_id);
-CREATE INDEX idx_loot_equipped ON inventory_loot(player_id, equipped);
+CREATE INDEX IF NOT EXISTS idx_loot_player ON inventory_loot(player_id);
+CREATE INDEX IF NOT EXISTS idx_loot_equipped ON inventory_loot(player_id, equipped);
 
 -- ============= NARRATIVE CHAPTERS =============
 
@@ -204,7 +204,7 @@ CREATE TABLE narrative_chapters (
   UNIQUE(player_id, chapter_number)
 );
 
-CREATE INDEX idx_chapters_player ON narrative_chapters(player_id);
+CREATE INDEX IF NOT EXISTS idx_chapters_player ON narrative_chapters(player_id);
 
 -- ============= NARRATIVE DECISIONS =============
 
@@ -223,7 +223,7 @@ CREATE TABLE narrative_decisions (
   UNIQUE(chapter_id, decision_id)
 );
 
-CREATE INDEX idx_decisions_chapter ON narrative_decisions(chapter_id);
+CREATE INDEX IF NOT EXISTS idx_decisions_chapter ON narrative_decisions(chapter_id);
 
 -- ============= LLM CACHE =============
 
@@ -242,9 +242,9 @@ CREATE TABLE llm_cache (
   hit_count INT DEFAULT 0
 );
 
-CREATE INDEX idx_cache_type ON llm_cache(cache_type);
-CREATE INDEX idx_cache_expires ON llm_cache(expires_at) WHERE expires_at IS NOT NULL;
-CREATE INDEX idx_cache_key ON llm_cache(cache_key);
+CREATE INDEX IF NOT EXISTS idx_cache_type ON llm_cache(cache_type);
+CREATE INDEX IF NOT EXISTS idx_cache_expires ON llm_cache(expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_cache_key ON llm_cache(cache_key);
 
 -- ============= BOSS REGISTRY =============
 
@@ -274,7 +274,7 @@ CREATE TABLE boss_registry (
   UNIQUE(boss_seed, boss_level)
 );
 
-CREATE INDEX idx_boss_level ON boss_registry(boss_level);
+CREATE INDEX IF NOT EXISTS idx_boss_level ON boss_registry(boss_level);
 
 -- ============= EVENT REGISTRY =============
 
@@ -300,7 +300,7 @@ CREATE TABLE event_registry (
   generated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_event_active ON event_registry(start_time, end_time) WHERE end_time > EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::BIGINT;
+CREATE INDEX IF NOT EXISTS idx_event_active ON event_registry(start_time, end_time);
 
 -- ============= LIMITED ITEMS =============
 
@@ -325,7 +325,7 @@ CREATE TABLE limited_items (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_limited_items_active ON limited_items(available_until) WHERE available_until > EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::BIGINT;
+CREATE INDEX IF NOT EXISTS idx_limited_items_active ON limited_items(available_until);
 
 -- ============= BATTLE LOG =============
 
@@ -347,8 +347,8 @@ CREATE TABLE battle_log (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_battle_player ON battle_log(player_id);
-CREATE INDEX idx_battle_date ON battle_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_battle_player ON battle_log(player_id);
+CREATE INDEX IF NOT EXISTS idx_battle_date ON battle_log(created_at DESC);
 
 -- ============= ASCENSIONS =============
 
@@ -387,7 +387,7 @@ CREATE TABLE sync_queue (
   retry_count INT DEFAULT 0 CHECK (retry_count >= 0)
 );
 
-CREATE INDEX idx_sync_pending ON sync_queue(synced_at) WHERE synced_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_pending ON sync_queue(synced_at) WHERE synced_at IS NULL;
 
 -- ============= API USAGE TRACKING =============
 
@@ -399,7 +399,7 @@ CREATE TABLE api_usage_log (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_usage_date ON api_usage_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_date ON api_usage_log(created_at DESC);
 
 -- ============= HELPER FUNCTIONS =============
 
@@ -466,8 +466,8 @@ CREATE TABLE IF NOT EXISTS battle_log (
   loot_dropped UUID,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_battle_player ON battle_log(player_id);
-CREATE INDEX idx_battle_date ON battle_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_battle_player ON battle_log(player_id);
+CREATE INDEX IF NOT EXISTS idx_battle_date ON battle_log(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS ascensions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -497,7 +497,7 @@ CREATE TABLE IF NOT EXISTS sync_queue (
   synced_at TIMESTAMP WITH TIME ZONE,
   retry_count INT DEFAULT 0 CHECK (retry_count >= 0)
 );
-CREATE INDEX idx_sync_pending ON sync_queue(synced_at) WHERE synced_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_pending ON sync_queue(synced_at) WHERE synced_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS limited_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -521,4 +521,4 @@ CREATE TABLE IF NOT EXISTS api_usage_log (
   cache_hit BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_usage_date ON api_usage_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_date ON api_usage_log(created_at DESC);

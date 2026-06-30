@@ -5,7 +5,9 @@
   "main": "api/battle.ts",
   "scripts": {
     "dev": "vercel dev",
-    "deploy": "vercel deploy --prod"
+    "deploy": "vercel deploy --prod",
+    "test": "node tests/run-all.cjs",
+    "test:logic": "node tests/progression.test.cjs && node tests/affinity.test.cjs && node tests/damage.test.cjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.9.0",

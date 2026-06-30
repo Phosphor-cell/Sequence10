@@ -25,6 +25,10 @@ set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_GAMES    OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(raylib)
 
+# Enable JPEG/JPG texture loading (raylib disables it by default).
+# Backdrops are .jpg, so without this LoadTexture() silently fails.
+target_compile_definitions(raylib PRIVATE SUPPORT_FILEFORMAT_JPG=1)
+
 set(NANOSVG_INCLUDE_DIR ${raylib_SOURCE_DIR}/src/external)
 
 # ── cpr ────────────────────────────────────────────────────────────────

@@ -1,0 +1,220 @@
+{
+  "project": "Sequence10 / Cultivation AFK Realm: Divine Descent",
+  "generated_note": "Auto-generated from source. Re-run scripts/gen_manifest.py after structural changes.",
+  "live_url": "https://sequence10.vercel.app",
+  "stack": {
+    "client": "C++17 + Raylib + cpr + nlohmann_json",
+    "server": "Vercel serverless (TypeScript, Node 24.x)",
+    "database": "Neon PostgreSQL",
+    "rendering": "procedural SVG paper-doll (nanosvg)"
+  },
+  "client_entry": "client/src/main.cpp",
+  "client_screens": [
+    "HOME",
+    "CHAPTER_SELECT",
+    "BATTLE",
+    "SHOP",
+    "INVENTORY",
+    "SUMMON",
+    "INDEX",
+    "STORY"
+  ],
+  "client_api_calls": [
+    "battle",
+    "chapters",
+    "loot",
+    "player"
+  ],
+  "endpoints": {
+    "_ai": {
+      "file": "server/api/_ai.ts",
+      "lines": 386,
+      "is_http_endpoint": false,
+      "route": null,
+      "called_by_client": false,
+      "is_mock": false,
+      "purpose": "api/_ai.ts Background LLM layer \u2014 Groq \u2192 Cerebras \u2192 Gemini \u2192 deterministic fallback.  All calls are: 1. Cache-checked first (llm_cache table"
+    },
+    "_db": {
+      "file": "server/api/_db.ts",
+      "lines": 28,
+      "is_http_endpoint": false,
+      "route": null,
+      "called_by_client": false,
+      "is_mock": false,
+      "purpose": "api/_db.ts  (HELPER \u2014 underscore = not an HTTP endpoint)  Shared Postgres pool, serverless-safe. On Vercel every cold start would otherwise "
+    },
+    "_namegen": {
+      "file": "server/api/_namegen.ts",
+      "lines": 67,
+      "is_http_endpoint": false,
+      "route": null,
+      "called_by_client": false,
+      "is_mock": false,
+      "purpose": "api/_namegen.ts  (HELPER \u2014 underscore = not an HTTP endpoint)  Deterministic procedural name generation. Replaces the idea of a tiny LLM: se"
+    },
+    "_progression": {
+      "file": "server/api/_progression.ts",
+      "lines": 121,
+      "is_http_endpoint": false,
+      "route": null,
+      "called_by_client": false,
+      "is_mock": false,
+      "purpose": "api/_progression.ts  (HELPER \u2014 underscore = not an HTTP endpoint)  Shared, deterministic progression math for level-up, idle rewards, and as"
+    },
+    "_ratelimit": {
+      "file": "server/api/_ratelimit.ts",
+      "lines": 64,
+      "is_http_endpoint": false,
+      "route": null,
+      "called_by_client": false,
+      "is_mock": false,
+      "purpose": "api/_ratelimit.ts  (HELPER \u2014 underscore = not an endpoint)  Serverless-safe rate limiting. In-memory limiters DON'T work on Vercel (each ins"
+    },
+    "affinity": {
+      "file": "server/api/affinity.ts",
+      "lines": 128,
+      "is_http_endpoint": true,
+      "route": "/api/affinity",
+      "called_by_client": false,
+      "is_mock": false,
+      "purpose": "api/affinity.ts Affinity engine: computes damage/healing multipliers when an armor's element interacts with a character/ally alignment.  Con"
+    },
+    "ascend": {
+      "file": "server/api/ascend.ts",
+      "lines": 112,
+      "is_http_endpoint": true,
+      "route": "/api/ascend",
+      "called_by_client": false,
+      "is_mock": false,
+      "purpose": "api/ascend.ts Server-authoritative ascension (prestige). Requires level >= requirement. Resets level/exp to 1/0, bumps ascension_level, whic"
+    },
+    "battle": {
+      "file": "server/api/battle.ts",
+      "lines": 35,
+      "is_http_endpoint": true,
+      "route": "/api/battle",
+      "called_by_client": true,
+      "is_mock": true,
+      "purpose": "api/battle.ts Mock battle endpoint (no database). Returns a resolved battle result."
+    },
+    "battle_v2": {
+      "file": "server/api/battle_v2.ts",
+      "lines": 161,
+      "is_http_endpoint": true,
+      "route": "/api/battle_v2",
+      "called_by_client": false,
+      "is_mock": false,
+      "purpose": "api/battle_v2.ts Endgame-grade battle resolver with uint64/uint128 damage math.  Design (validated by simulation): - Damage is computed in B"
+    },
+    "chapters": {
+      "file": "server/api/chapters.ts",
+      "lines": 85,
+      "is_http_endpoint": true,
+      "route": "/api/chapters",
+      "called_by_client": true,
+      "is_mock": false,
+      "purpose": ""
+    },
+    "health": {
+      "file": "server/api/health.ts",
+      "lines": 50,
+      "is_http_endpoint": true,
+      "route": "/api/health",
+      "called_by_client": false,
+      "is_mock": false,
+      "purpose": "api/health.ts Lightweight health/status endpoint for uptime monitoring (UptimeRobot, Better Uptime, Vercel checks, etc.) and quick manual di"
+    },
+    "idle": {
+      "file": "server/api/idle.ts",
+      "lines": 151,
+      "is_http_endpoint": true,
+      "route": "/api/idle",
+      "called_by_client": false,
+      "is_mock": false,
+      "purpose": "api/idle.ts Server-authoritative offline/AFK rewards. CLOCK-CHEAT PROOF: - The client NEVER sends a timestamp. - Elapsed time = (server NOW)"
+    },
+    "levelup": {
+      "file": "server/api/levelup.ts",
+      "lines": 99,
+      "is_http_endpoint": true,
+      "route": "/api/levelup",
+      "called_by_client": false,
+      "is_mock": false,
+      "purpose": "api/levelup.ts Server-authoritative level processing. The client never decides levels or stats \u2014 it sends exp earned (from a validated battl"
+    },
+    "loot": {
+      "file": "server/api/loot.ts",
+      "lines": 43,
+      "is_http_endpoint": true,
+      "route": "/api/loot",
+      "called_by_client": true,
+      "is_mock": true,
+      "purpose": "api/loot.ts Mock loot endpoint (no database). ~40% drop rate with random rarity."
+    },
+    "loot_core": {
+      "file": "server/api/loot_core.ts",
+      "lines": 149,
+      "is_http_endpoint": true,
+      "route": "/api/loot_core",
+      "called_by_client": false,
+      "is_mock": false,
+      "purpose": "loot_core.ts Pure, deterministic loot generation. NO side effects, NO db, NO network. The SAME seed ALWAYS produces the SAME loot \u2014 so the s"
+    },
+    "player": {
+      "file": "server/api/player.ts",
+      "lines": 108,
+      "is_http_endpoint": true,
+      "route": "/api/player",
+      "called_by_client": true,
+      "is_mock": true,
+      "purpose": "api/player.ts Player lifecycle, DB-backed (Neon). Replaces the old in-memory mock so the player the client creates ACTUALLY EXISTS in the da"
+    }
+  },
+  "database_tables": [
+    "api_usage_log",
+    "ascensions",
+    "battle_log",
+    "boss_registry",
+    "character_stats",
+    "equipment_slots",
+    "event_registry",
+    "idle_state",
+    "inventory",
+    "inventory_loot",
+    "items",
+    "limited_items",
+    "llm_cache",
+    "narrative_chapters",
+    "narrative_decisions",
+    "players",
+    "summoned_heroes",
+    "sync_queue"
+  ],
+  "database_table_count": 18,
+  "assets": {
+    "backdrops": {
+      "jpg": 8
+    },
+    "placeholders": {
+      "svg": 15
+    }
+  },
+  "critical_invariants": [
+    "Vercel ignores /api files starting with '_' (helpers, not endpoints)",
+    "raylib needs SUPPORT_FILEFORMAT_JPG=1 (set in client/CMakeLists.txt) or .jpg backdrops fail",
+    "tsconfig target must be ES2020+ for BigInt literals",
+    "combat numbers are BigInt; cross the wire as strings",
+    "all endpoints set CORS '*' and handle OPTIONS"
+  ],
+  "known_gaps_priority": [
+    "endpoints are in-memory mocks; 19 DB tables unused (no persistence)",
+    "client calls mock battle.ts, not tested battle_v2.ts",
+    "affinity.ts built+tested but never called by client",
+    "equipping armor has no mechanical effect (visual only)",
+    "no ability system (planned 150 abilities + synergies)",
+    "no idle/AFK reward calculation despite idle_state table",
+    "no level-up curve or ascension path",
+    "asset_manager.hpp is an unimplemented skeleton"
+  ]
+}
