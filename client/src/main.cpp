@@ -145,6 +145,34 @@ namespace Col {
     const Color C_OVERLAY  = { 0, 0, 0, 150 };
 }
 
+// Transient on-screen status/error message. Renders on top of every screen
+// (see drawToast in the main loop) so silent failures -- a guard clause that
+// returned early, an API call that failed or timed out -- are never invisible
+// to the player the way "SET AS CURRENT" and "FIGHT NOW" silently were.
+static std::string g_toastMsg;
+static float       g_toastTimer = 0.0f;
+static Color       g_toastColor = Col::C_REDDY;
+static void showToast(const std::string& msg, Color color = Col::C_REDDY) {
+    g_toastMsg = msg;
+    g_toastColor = color;
+    g_toastTimer = 3.0f;
+}
+static void drawToast() {
+    if (g_toastTimer <= 0.0f || g_toastMsg.empty()) return;
+    int fs = 16;
+    int tw = MeasureText(g_toastMsg.c_str(), fs);
+    int pw = tw + 40, ph = 44;
+    int px = (SCREEN_WIDTH - pw) / 2, py = 92;
+    // fade out over the last second
+    unsigned char a = (unsigned char)(g_toastTimer < 1.0f ? 255 * g_toastTimer : 255);
+    Color bg = { 22, 22, 35, (unsigned char)(a * 0.92f) };
+    Color border = g_toastColor; border.a = a;
+    Color txt = Col::C_TXT; txt.a = a;
+    DrawRectangleRounded({ (float)px, (float)py, (float)pw, (float)ph }, 0.25f, 8, bg);
+    DrawRectangleRoundedLines({ (float)px, (float)py, (float)pw, (float)ph }, 0.25f, 8, 1.5f, border);
+    DrawText(g_toastMsg.c_str(), px + 20, py + ph / 2 - fs / 2, fs, txt);
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────
 static Rarity rarityFromString(const std::string& s) {
     if (s == "Uncommon")  return Rarity::Uncommon;
@@ -428,6 +456,9 @@ static void rebuildTeamSlotsFromRoster() {
             g_teamSlots[h.partySlot] = h.id;
 }
 
+// Forward declaration: fetchHeroes() calls this, but it's defined further down.
+static void fetchHeroShards();
+
 static void fetchHeroes() {
     if (g_player.id.empty()) return;
     auto res = apiPost("heroes", { { "playerId", g_player.id }, { "action", "list" } });
@@ -607,13 +638,23 @@ static void requestLoot() {
 }
 
 static void startBattle() {
-    if (g_player.id.empty() || g_battle.active) return;
+    if (g_player.id.empty()) {
+        showToast("Not connected yet -- please wait a moment and try again.");
+        return;
+    }
+    if (g_battle.active) {
+        showToast("A battle is already in progress.");
+        return;
+    }
     auto res = apiPost("battle", {
         { "playerId",    g_player.id },
         { "chapterId",   g_currentChapter },
         { "playerLevel", g_player.level }
     });
-    if (!res.contains("victory")) return;
+    if (!res.contains("victory")) {
+        showToast("Couldn't reach the server -- check your connection and try again.");
+        return;
+    }
 
     g_battle.active       = true;
     g_battle.displayTimer = 0.0f;
@@ -772,11 +813,16 @@ static void drawChapterSelect(Vector2 mouse, bool clicked) {
         Rectangle row = { lx + 10, ry, lw - 20, 30 };
         bool hov = pointInRect(mouse, row);
         bool sel = (ch.id == g_selectedChapter);
+        bool isCurrent = (ch.id == g_currentChapter);
         if (sel)       DrawRectangleRounded(row, 0.3f, 6, Col::C_PANEL_HI);
         else if (hov)  DrawRectangleRounded(row, 0.3f, 6, { 30, 30, 48, 255 });
+        // Gold outline marks the ACTIVE chapter, independent of what you're
+        // currently browsing/previewing (sel) -- these can differ.
+        if (isCurrent) DrawRectangleRoundedLines(row, 0.3f, 6, 2.0f, Col::C_GOLD);
         Color tc = sel ? Col::C_ACCENT : (hov ? Col::C_TXT : Col::C_TXT_DIM);
         DrawText(TextFormat("Ch %d  -  Lv %d", ch.id, ch.levelCap),
                  (int)row.x + 10, (int)row.y + 8, 12, tc);
+        if (isCurrent) DrawText("CURRENT", (int)(row.x + row.width - 60), (int)row.y + 9, 10, Col::C_GOLD);
         if (hov && clicked) g_selectedChapter = ch.id;
         ry += 36;
     }
@@ -793,12 +839,22 @@ static void drawChapterSelect(Vector2 mouse, bool clicked) {
         py = drawWrapped(c.storyText, px, py, (int)dw - 48, 14, Col::C_TXT);
         py += 20;
 
-        Button setBtn  { { (float)px,       (float)py, 200, 44 }, "SET AS CURRENT" };
-        Button fightBtn{ { (float)px + 216, (float)py, 200, 44 }, "FIGHT NOW" };
-        if (drawButton(setBtn, mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT_2)) {
-            g_currentChapter = c.id;
-            appendStory("[" + c.name + "] " + c.storyText);
+        bool alreadyCurrent = (c.id == g_currentChapter);
+        if (alreadyCurrent) {
+            // Static badge instead of a button -- unmistakable confirmation
+            // that this chapter IS the active one (no click needed/possible).
+            Rectangle badge = { (float)px, (float)py, 200, 44 };
+            DrawRectangleRounded(badge, 0.25f, 8, Col::C_PANEL);
+            DrawRectangleRoundedLines(badge, 0.25f, 8, 1.5f, Col::C_GOLD);
+            DrawText("CURRENT CHAPTER", (int)px + 16, (int)py + 15, 13, Col::C_GOLD);
+        } else {
+            Button setBtn{ { (float)px, (float)py, 200, 44 }, "SET AS CURRENT" };
+            if (drawButton(setBtn, mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT_2)) {
+                g_currentChapter = c.id;
+                appendStory("[" + c.name + "] " + c.storyText);
+            }
         }
+        Button fightBtn{ { (float)px + 216, (float)py, 200, 44 }, "FIGHT NOW" };
         if (drawButton(fightBtn, mouse, clicked, Col::C_PANEL_HI, Col::C_GREENY)) {
             g_currentChapter = c.id;
             appendStory("[" + c.name + "] " + c.storyText);
@@ -1380,6 +1436,7 @@ int main(void) {
 
     while (!WindowShouldClose()) {
         float dt = GetFrameTime();
+        if (g_toastTimer > 0.0f) g_toastTimer -= dt;
         Vector2 mouse = GetMousePosition();
         bool clicked = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 
@@ -1450,6 +1507,7 @@ int main(void) {
                 g_idlePopup = false;
         }
 
+        drawToast();
         EndDrawing();
     }
 
