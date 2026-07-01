@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <future>
 #include <atomic>
+#include <functional>
 
 #include "paper_doll.hpp"
 #include "device_id.hpp"
@@ -500,50 +501,62 @@ static void rebuildTeamSlotsFromRoster() {
 
 // Forward declaration: fetchHeroes() calls this, but it's defined further down.
 static void fetchHeroShards();
+// Forward declarations: the async request system is defined further down, but
+// the heavy calls (fetchHeroes/summonHeroes) above it need these.
+static bool asyncBusy();
+static void asyncPost(const std::string& endpoint, const json& body,
+                      const std::string& label, std::function<void(const json&)> onDone);
 
 static void fetchHeroes() {
     if (g_player.id.empty()) return;
-    auto res = apiPost("heroes", { { "playerId", g_player.id }, { "action", "list" } });
-    g_heroes.clear();
-    if (res.contains("heroes") && res["heroes"].is_array()) {
-        for (auto& h : res["heroes"]) {
-            Hero hero;
-            hero.id        = h.value("id", std::string(""));
-            hero.className = h.value("class_name", std::string("Unknown"));
-            hero.file_name = h.value("file_name", std::string(""));
-            hero.tier      = h.value("tier", std::string("mortal"));
-            hero.rarity    = h.value("rarity", std::string("Common"));
-            hero.alignment = h.value("alignment", std::string("neutral"));
-            hero.element   = h.value("element", std::string("neutral"));
-            hero.level     = h.value("level", 1);
-            hero.starLevel = h.value("star_level", 1);
-            hero.health    = h.value("health", 0);
-            hero.attack    = h.value("attack", 0);
-            hero.defense   = h.value("defense", 0);
-            hero.inParty   = h.value("in_party", false);
-            // party_slot is null when benched — value() only defaults on a MISSING
-            // key, not a null one, so read it explicitly to avoid a type throw.
-            hero.partySlot = -1;
-            if (h.contains("party_slot") && h["party_slot"].is_number_integer())
-                hero.partySlot = h["party_slot"].get<int>();
-            g_heroes.push_back(hero);
+    if (asyncBusy()) return;
+    g_heroesFetched = true;   // set immediately so screens don't re-fire the fetch every frame
+    asyncPost("heroes", { { "playerId", g_player.id }, { "action", "list" } },
+              "Loading heroes...", [](const json& res) {
+        g_heroes.clear();
+        if (res.contains("heroes") && res["heroes"].is_array()) {
+            for (auto& h : res["heroes"]) {
+                Hero hero;
+                hero.id        = h.value("id", std::string(""));
+                hero.className = h.value("class_name", std::string("Unknown"));
+                hero.file_name = h.value("file_name", std::string(""));
+                hero.tier      = h.value("tier", std::string("mortal"));
+                hero.rarity    = h.value("rarity", std::string("Common"));
+                hero.alignment = h.value("alignment", std::string("neutral"));
+                hero.element   = h.value("element", std::string("neutral"));
+                hero.level     = h.value("level", 1);
+                hero.starLevel = h.value("star_level", 1);
+                hero.health    = h.value("health", 0);
+                hero.attack    = h.value("attack", 0);
+                hero.defense   = h.value("defense", 0);
+                hero.inParty   = h.value("in_party", false);
+                hero.partySlot = -1;
+                if (h.contains("party_slot") && h["party_slot"].is_number_integer())
+                    hero.partySlot = h["party_slot"].get<int>();
+                g_heroes.push_back(hero);
+            }
         }
-    }
-    rebuildTeamSlotsFromRoster();
-    g_heroesFetched = true;
-    fetchHeroShards();
+        rebuildTeamSlotsFromRoster();
+        fetchHeroShards();   // chained (async internally)
+    });
 }
 
 static void summonHeroes(int count) {
     if (g_player.id.empty()) return;
-    auto res = apiPost("heroes", { { "playerId", g_player.id }, { "action", "summon" }, { "count", count } });
-    if (res.contains("summoned")) {
-        int n = (int)res["summoned"].size();
-        appendStory("Summoned " + std::to_string(n) + " hero(es).");
-        fetchHeroes();   // refresh roster
-    } else if (res.contains("error")) {
-        appendStory("Summon failed: " + res.value("error", std::string("unknown")));
-    }
+    if (asyncBusy()) return;
+    std::string label = (count >= 10) ? "Summoning x10..." : "Summoning...";
+    asyncPost("heroes", { { "playerId", g_player.id }, { "action", "summon" }, { "count", count } },
+              label, [](const json& res) {
+        if (res.contains("summoned")) {
+            int n = (int)res["summoned"].size();
+            appendStory("Summoned " + std::to_string(n) + " hero(es).");
+            g_heroesFetched = false;   // roster is stale; it refetches on next Heroes entry / below
+            fetchHeroes();             // refresh now (async internally)
+        } else if (res.contains("error")) {
+            appendStory("Summon failed: " + res.value("error", std::string("unknown")));
+            showToast("Summon failed: " + res.value("error", std::string("unknown")));
+        }
+    });
 }
 
 // Place one hero into a party slot (server kicks out whoever was there).
@@ -570,13 +583,16 @@ static void unequipHero(const std::string& heroId) {
 // star-up button to show "have X / need Y" and grey out when unaffordable.
 static void fetchHeroShards() {
     if (g_player.id.empty()) return;
-    auto res = apiPost("heroes", { { "playerId", g_player.id }, { "action", "shards" } });
-    g_heroShards.clear();
-    if (res.contains("shards") && res["shards"].is_array()) {
-        for (auto& s : res["shards"]) {
-            g_heroShards[s.value("class_name", std::string(""))] = s.value("shards", 0);
+    if (asyncBusy()) return;
+    asyncPost("heroes", { { "playerId", g_player.id }, { "action", "shards" } },
+              "", [](const json& res) {
+        g_heroShards.clear();
+        if (res.contains("shards") && res["shards"].is_array()) {
+            for (auto& s : res["shards"]) {
+                g_heroShards[s.value("class_name", std::string(""))] = s.value("shards", 0);
+            }
         }
-    }
+    });
 }
 
 // Spend shards to raise one hero's star level by 1 (server validates cost
@@ -665,6 +681,68 @@ static void loadActiveTeam() {
     else rebuildTeamSlotsFromRoster();
 }
 
+// ─── Generic async request system ──────────────────────────────────────────
+// Heavy server calls (heroes, summon, fight) must NOT block the main thread —
+// a blocking cpr::Post freezes the whole window for the entire round-trip
+// (Vercel cold-start + Neon + resolution = seconds of frozen UI). This runs any
+// endpoint call off-thread and invokes a callback on the MAIN thread when the
+// result is ready, so the window keeps rendering (and can show a spinner).
+//
+// Single-slot: one async request at a time (these are user-initiated and
+// mutually exclusive in practice — you can't summon and fight simultaneously).
+// Additional requests while one is in flight are ignored (the UI disables the
+// buttons + shows a spinner during that window).
+static std::future<json>            g_reqFuture;
+static bool                         g_reqInFlight = false;
+static std::string                  g_reqLabel;               // shown in the spinner
+static std::function<void(const json&)> g_reqCallback;        // run on main thread when ready
+
+static bool asyncBusy() { return g_reqInFlight; }
+
+// Fire an endpoint call off-thread. onDone runs on the main thread when ready.
+static void asyncPost(const std::string& endpoint, const json& body,
+                      const std::string& label, std::function<void(const json&)> onDone) {
+    if (g_reqInFlight) return;                 // ignore while one is running
+    g_reqInFlight = true;
+    g_reqLabel = label;
+    g_reqCallback = std::move(onDone);
+    // Copy endpoint+body into the task so the background thread owns them.
+    g_reqFuture = std::async(std::launch::async, [endpoint, body]() {
+        return apiPost(endpoint, body);
+    });
+}
+
+// Poll once per frame; if the in-flight request finished, run its callback.
+static void pollAsyncRequest() {
+    if (!g_reqInFlight) return;
+    if (g_reqFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        json res = g_reqFuture.get();
+        g_reqInFlight = false;                 // clear BEFORE callback so it can fire another
+        auto cb = g_reqCallback;
+        g_reqCallback = nullptr;
+        if (cb) cb(res);
+    }
+}
+
+// Draw a small centered "working" spinner overlay while a request is in flight.
+static void drawAsyncSpinner() {
+    if (!g_reqInFlight) return;
+    // dim the screen slightly and show a rotating arc + label
+    DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, { 0, 0, 0, 90 });
+    float cx = SCREEN_WIDTH / 2.0f, cy = SCREEN_HEIGHT / 2.0f;
+    float t = (float)GetTime();
+    for (int i = 0; i < 12; i++) {
+        float ang = t * 4.0f + i * (2 * PI / 12);
+        float a = (float)i / 12.0f;
+        unsigned char alpha = (unsigned char)(60 + a * 195);
+        Vector2 p = { cx + cosf(ang) * 26, cy + sinf(ang) * 26 };
+        DrawCircleV(p, 4.0f, { 200, 200, 255, alpha });
+    }
+    const char* lbl = g_reqLabel.empty() ? "Working..." : g_reqLabel.c_str();
+    int tw = MeasureText(lbl, 16);
+    DrawText(lbl, (int)(cx - tw / 2), (int)(cy + 44), 16, Col::C_TXT);
+}
+
 // Background sync: HTTP runs off-thread; result is applied on the main
 // thread only when ready, so g_player is never written concurrently.
 static std::future<json> g_syncFuture;
@@ -729,9 +807,6 @@ static void requestLoot() {
 
 static void startBattle() {
     if (g_player.id.empty()) {
-        // Startup init likely failed transiently -- retry right now instead of
-        // leaving the player stuck for the rest of the session. initPlayer()
-        // shows its own specific toast (with the real error) if this fails too.
         initPlayer("TestPlayer");
         if (g_player.id.empty()) return;
     }
@@ -739,35 +814,37 @@ static void startBattle() {
         showToast("A battle is already in progress.");
         return;
     }
-    auto res = apiPost("battle", {
+    if (asyncBusy()) return;   // a request is already running
+
+    asyncPost("battle", {
         { "playerId",    g_player.id },
         { "chapterId",   g_currentChapter },
         { "playerLevel", g_player.level }
+    }, "Fighting...", [](const json& res) {
+        if (!res.contains("victory")) {
+            std::string err = apiErrorText(res);
+            showToast("Battle request failed" + (err.empty() ? std::string("") : (" (" + err + ")")) + ".");
+            return;
+        }
+        g_battle.active       = true;
+        g_battle.displayTimer = 0.0f;
+        g_battle.enemyLevel   = res.value("enemyLevel", g_player.level);
+        g_battle.enemyName    = res.value("enemyName", std::string("Enemy"));
+        g_battle.victory      = res.value("victory", false);
+        g_battle.damageDealt  = jsonU64(res, "damageDealt", 0);
+        g_battle.goldEarned   = jsonU64(res, "goldEarned", 0);
+        g_battle.expEarned    = jsonU64(res, "expEarned", 0);
+        g_battle.leveledUp    = res.value("levelUp", false);
+        g_battle.newLevel     = res.value("newLevel", g_player.level);
+
+        g_player.gold += g_battle.goldEarned;
+        g_player.exp  += g_battle.expEarned;
+        if (g_battle.leveledUp) g_player.level = g_battle.newLevel;
+
+        if (g_battle.victory) requestLoot();
+
+        g_screen = Screen::BATTLE;
     });
-    if (!res.contains("victory")) {
-        std::string err = apiErrorText(res);
-        showToast("Battle request failed" + (err.empty() ? std::string("") : (" (" + err + ")")) + ".");
-        return;
-    }
-
-    g_battle.active       = true;
-    g_battle.displayTimer = 0.0f;
-    g_battle.enemyLevel   = res.value("enemyLevel", g_player.level);
-    g_battle.enemyName    = res.value("enemyName", std::string("Enemy"));
-    g_battle.victory      = res.value("victory", false);
-    g_battle.damageDealt  = jsonU64(res, "damageDealt", 0);
-    g_battle.goldEarned   = jsonU64(res, "goldEarned", 0);
-    g_battle.expEarned    = jsonU64(res, "expEarned", 0);
-    g_battle.leveledUp    = res.value("levelUp", false);
-    g_battle.newLevel     = res.value("newLevel", g_player.level);
-
-    g_player.gold += g_battle.goldEarned;
-    g_player.exp  += g_battle.expEarned;
-    if (g_battle.leveledUp) g_player.level = g_battle.newLevel;
-
-    if (g_battle.victory) requestLoot();
-
-    g_screen = Screen::BATTLE;
 }
 
 // ─── Top bar ───────────────────────────────────────────────────────────
@@ -1585,6 +1662,7 @@ int main(void) {
         g_syncTimer += dt;
         if (g_syncTimer >= SYNC_INTERVAL) { syncPlayerAsync(); g_syncTimer = 0.f; }
         pollSync();
+        pollAsyncRequest();
         if (g_summonFlash > 0.f) g_summonFlash -= dt * 0.4f;
 
         BeginDrawing();
@@ -1632,6 +1710,7 @@ int main(void) {
                 g_idlePopup = false;
         }
 
+        drawAsyncSpinner();
         drawToast();
         EndDrawing();
     }

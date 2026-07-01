@@ -38,17 +38,20 @@ export const THEMES = [
 // Actual image filenames per tier (client-side assets at client/assets/heros/tierN/*.jpg).
 // These are discovered from the filesystem during this session; in production they'd be
 // read from disk at deploy-time. For now, hardcoded from what actually exists.
+// EXACT on-disk image filenames (case-sensitive — the server is Linux). These
+// MUST match client/assets/heros/tierN/*.jpg byte-for-byte or the client shows
+// a blank card. Do not "prettify" these; they are asset keys, not display text.
 const HERO_FILES_BY_TIER: Record<string, string[]> = {
   // Tier 1 (medieval) — Common/Uncommon
-  tier1: ["Spearman", "Swordsman", "Archer", "Scout", "Mercenary", "Trapper"],
+  tier1: ["spearman", "swordsman", "archer", "scout", "mercenary", "trapper"],
   // Tier 2 (xianxia_normal) — Rare
-  tier2: ["Herbalist", "Mage", "Sage"],
-  // Tier 3 (xianxia_horror) — Rare (edge case: 3 heroes for one tier)
-  tier3: ["Assassin", "Beast-Master", "Shadow-Dancer"],
+  tier2: ["herbalist", "mage", "sage"],
+  // Tier 3 (xianxia_horror) — (note: 'shadowa-dancer' is the actual filename)
+  tier3: ["assassin", "beast-master", "shadowa-dancer"],
   // Tier 4 (victorian_normal) — Epic
-  tier4: ["Paladin", "Spellblade", "Virtue"],
+  tier4: ["paladin", "spellblade", "spellblade_midnight", "virtue"],
   // Tier 5 (victorian_horror) — Legendary
-  tier5: ["Archangel", "Dominion", "Fallen", "Hellion", "Life-Bringer", "Reality_Weaver", "Sandman", "Seraph", "Time-Weaver", "Void-God"],
+  tier5: ["Archangel", "Dominion", "Fallen", "Hellion", "Life-Bringer", "Reality_weaver", "Sandman", "Seraph", "Time-Weaver", "Void-god"],
 };
 
 // Map rarity to tier folder for image lookup (separate from power tier).
@@ -81,24 +84,46 @@ export interface GenHero {
   tier: string; health: number; attack: number; defense: number;
 }
 
+// Stat ranges per rarity tier. Upper limit is easier to reach (lower variance cap)
+// but you still need luck. These feel "tiered" — T5 Legendary is genuinely stronger.
+// Format: { healthLo, healthHi, attackLo, attackHi, defenseLo, defenseHi }
+const STAT_RANGES_BY_RARITY: Record<Rarity, { health: [number, number]; attack: [number, number]; defense: [number, number] }> = {
+  Common:    { health: [800, 1000],   attack: [50, 70],    defense: [20, 30] },     // T1: max 5 → 50-70 atk
+  Uncommon:  { health: [900, 1600],   attack: [60, 110],   defense: [25, 45] },     // T2: 3-11 → 60-110 atk
+  Rare:      { health: [1200, 2200],  attack: [90, 200],   defense: [40, 80] },     // T3: 6-20 → 90-200 atk
+  Epic:      { health: [1700, 3100],  attack: [130, 280],  defense: [60, 120] },    // T4: 13-28 → 130-280 atk
+  Legendary: { health: [2400, 5200],  attack: [220, 520],  defense: [100, 200] },   // T5: 22-52 → 220-520 atk
+};
+
+// Turn an asset filename into a display name: "shadowa-dancer" → "Shadowa Dancer",
+// "Void-god" → "Void God", "spellblade_midnight" → "Spellblade Midnight".
+function prettifyName(fileName: string): string {
+  return fileName
+    .replace(/[-_]+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
 export function generateHero(seed: number, rarity: Rarity): GenHero {
   const r = mulberry32(seed);
   
   // Map rarity to tier folder. Tier folder determines which image filenames are available.
   const tierFolder = TIER_FOLDER_BY_RARITY[rarity];
   const availableFiles = HERO_FILES_BY_TIER[tierFolder];
-  const fileName = pick(r, availableFiles);  // pick actual image filename
-  const className = fileName;                 // display name = filename (no .jpg extension)
+  const fileName = pick(r, availableFiles);  // EXACT image filename (asset key)
+  const className = prettifyName(fileName);   // pretty display name derived from it
   
   const alignment = pick(r, ALIGNMENTS);
   const element = pick(r, ELEMENTS);
   const band = TIER_BY_RARITY[rarity];
+  const ranges = STAT_RANGES_BY_RARITY[rarity];
 
   const roll = (lo: number, hi: number) => lo + Math.floor(r() * (hi - lo + 1));
-  const variance = 0.85 + r() * 0.30; // ±15%
-  const health  = Math.max(1, Math.round(roll(800, 1200) * band.mult * variance));
-  const attack  = Math.max(1, Math.round(roll(80, 140)   * band.mult * variance));
-  const defense = Math.max(0, Math.round(roll(30, 70)    * band.mult * variance));
+  const health  = roll(ranges.health[0], ranges.health[1]);
+  const attack  = roll(ranges.attack[0], ranges.attack[1]);
+  const defense = roll(ranges.defense[0], ranges.defense[1]);
 
   return { className, fileName, alignment, element, tier: band.tier, health, attack, defense };
 }
