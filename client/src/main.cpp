@@ -315,9 +315,33 @@ static json apiPost(const std::string& endpoint, const json& body) {
         cpr::Timeout{ 4000 }
     );
     if (r.status_code == 200 || r.status_code == 201) {
-        return json::parse(r.text, nullptr, false);
+        auto parsed = json::parse(r.text, nullptr, false);
+        if (!parsed.is_discarded()) return parsed;
+        json err = json::object();
+        err["_apiError"] = true;
+        err["_httpStatus"] = 0;
+        err["_detail"] = "malformed response from server";
+        return err;
     }
-    return json::object();
+    // Preserve WHY it failed instead of silently returning nothing -- callers
+    // can surface this via apiErrorText() so a failure is never invisible.
+    json err = json::object();
+    err["_apiError"] = true;
+    err["_httpStatus"] = (int)r.status_code;
+    err["_detail"] = r.error.message.empty()
+        ? (r.status_code == 0 ? std::string("no response / timeout") : std::string(""))
+        : r.error.message;
+    return err;
+}
+
+// Turns an apiPost failure object into a short human-readable string, e.g.
+// "no response / timeout" or "HTTP 500". Returns "" if res wasn't a failure.
+static std::string apiErrorText(const json& res) {
+    if (!res.is_object() || !res.value("_apiError", false)) return "";
+    int status = res.value("_httpStatus", 0);
+    std::string detail = res.value("_detail", std::string(""));
+    if (status == 0) return detail.empty() ? std::string("no response / timeout") : detail;
+    return "HTTP " + std::to_string(status) + (detail.empty() ? std::string("") : (" - " + detail));
 }
 
 static void initPlayer(const std::string& username) {
@@ -331,7 +355,10 @@ static void initPlayer(const std::string& username) {
     if (res.contains("playerId")) {
         g_player.id       = res.value("playerId", std::string(""));
         g_player.username = res.value("username", username);
+        return;
     }
+    std::string err = apiErrorText(res);
+    showToast("Couldn't connect to the server" + (err.empty() ? std::string("") : (" (" + err + ")")) + ".");
 }
 
 static void fetchChapters() {
@@ -639,8 +666,11 @@ static void requestLoot() {
 
 static void startBattle() {
     if (g_player.id.empty()) {
-        showToast("Not connected yet -- please wait a moment and try again.");
-        return;
+        // Startup init likely failed transiently -- retry right now instead of
+        // leaving the player stuck for the rest of the session. initPlayer()
+        // shows its own specific toast (with the real error) if this fails too.
+        initPlayer("TestPlayer");
+        if (g_player.id.empty()) return;
     }
     if (g_battle.active) {
         showToast("A battle is already in progress.");
@@ -652,7 +682,8 @@ static void startBattle() {
         { "playerLevel", g_player.level }
     });
     if (!res.contains("victory")) {
-        showToast("Couldn't reach the server -- check your connection and try again.");
+        std::string err = apiErrorText(res);
+        showToast("Battle request failed" + (err.empty() ? std::string("") : (" (" + err + ")")) + ".");
         return;
     }
 
