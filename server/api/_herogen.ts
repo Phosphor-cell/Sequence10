@@ -35,12 +35,29 @@ export const THEMES = [
   "medieval", "xianxia_normal", "xianxia_horror", "victorian_normal", "victorian_horror",
 ];
 
-const CLASS_BY_THEME: Record<string, string[]> = {
-  medieval:         ["Knight", "Paladin", "Warden", "Crusader", "Templar", "Halberdier"],
-  xianxia_normal:   ["Sword Cultivator", "Qi Adept", "Pill Master", "Sect Disciple", "Spirit Fencer", "Talisman Scribe"],
-  xianxia_horror:   ["Corpse Cultivator", "Blood Ascetic", "Hollow Immortal", "Devouring Monk", "Grave Sovereign"],
-  victorian_normal: ["Duelist", "Inspector", "Aetheric Engineer", "Gentleman Brawler", "Clockwork Lancer"],
-  victorian_horror: ["Plague Doctor", "Revenant Countess", "Gaslit Wraith", "Ashen Mortician", "Lantern Stalker"],
+// Actual image filenames per tier (client-side assets at client/assets/heros/tierN/*.jpg).
+// These are discovered from the filesystem during this session; in production they'd be
+// read from disk at deploy-time. For now, hardcoded from what actually exists.
+const HERO_FILES_BY_TIER: Record<string, string[]> = {
+  // Tier 1 (medieval) — Common/Uncommon
+  tier1: ["Spearman", "Swordsman", "Archer", "Scout", "Mercenary", "Trapper"],
+  // Tier 2 (xianxia_normal) — Rare
+  tier2: ["Herbalist", "Mage", "Sage"],
+  // Tier 3 (xianxia_horror) — Rare (edge case: 3 heroes for one tier)
+  tier3: ["Assassin", "Beast-Master", "Shadow-Dancer"],
+  // Tier 4 (victorian_normal) — Epic
+  tier4: ["Paladin", "Spellblade", "Virtue"],
+  // Tier 5 (victorian_horror) — Legendary
+  tier5: ["Archangel", "Dominion", "Fallen", "Hellion", "Life-Bringer", "Reality_Weaver", "Sandman", "Seraph", "Time-Weaver", "Void-God"],
+};
+
+// Map rarity to tier folder for image lookup (separate from power tier).
+const TIER_FOLDER_BY_RARITY: Record<Rarity, string> = {
+  Common:    "tier1",
+  Uncommon:  "tier1",
+  Rare:      "tier2",
+  Epic:      "tier4",
+  Legendary: "tier5",
 };
 
 const ALIGNMENTS = ["neutral", "demonic", "angelic", "void", "celestial", "abyssal", "resonant"] as const;
@@ -60,14 +77,19 @@ export const TIER_BY_RARITY: Record<Rarity, { tier: string; mult: number }> = {
 };
 
 export interface GenHero {
-  theme: string; className: string; alignment: string; element: string;
+  className: string; fileName: string; alignment: string; element: string;
   tier: string; health: number; attack: number; defense: number;
 }
 
 export function generateHero(seed: number, rarity: Rarity): GenHero {
   const r = mulberry32(seed);
-  const theme = pick(r, THEMES);
-  const className = pick(r, CLASS_BY_THEME[theme]);
+  
+  // Map rarity to tier folder. Tier folder determines which image filenames are available.
+  const tierFolder = TIER_FOLDER_BY_RARITY[rarity];
+  const availableFiles = HERO_FILES_BY_TIER[tierFolder];
+  const fileName = pick(r, availableFiles);  // pick actual image filename
+  const className = fileName;                 // display name = filename (no .jpg extension)
+  
   const alignment = pick(r, ALIGNMENTS);
   const element = pick(r, ELEMENTS);
   const band = TIER_BY_RARITY[rarity];
@@ -78,7 +100,7 @@ export function generateHero(seed: number, rarity: Rarity): GenHero {
   const attack  = Math.max(1, Math.round(roll(80, 140)   * band.mult * variance));
   const defense = Math.max(0, Math.round(roll(30, 70)    * band.mult * variance));
 
-  return { theme, className, alignment, element, tier: band.tier, health, attack, defense };
+  return { className, fileName, alignment, element, tier: band.tier, health, attack, defense };
 }
 
 // ── Star-up / fusion economy ────────────────────────────────────────────────

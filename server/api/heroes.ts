@@ -51,8 +51,8 @@ function heroRowToJson(r: any) {
   return {
     id: r.id,
     class_name: r.class_name,
+    file_name: r.file_name,
     tier: r.tier,
-    theme: r.theme,
     rarity: r.rarity,
     alignment: r.alignment,
     element: r.element,
@@ -213,13 +213,13 @@ export default async (req: VercelRequest, res: VercelResponse) => {
 
             const ins = await client.query(
               `INSERT INTO summoned_heroes
-                 (player_id, class_name, tier, theme, seed, rarity, alignment, element,
+                 (player_id, class_name, file_name, tier, seed, rarity, alignment, element,
                   level, exp, health, attack, defense, in_party, party_slot)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8, 1, 0, $9,$10,$11, FALSE, NULL)
                ON CONFLICT (player_id, seed) DO NOTHING
-               RETURNING id, class_name, tier, theme, rarity, alignment, element,
+               RETURNING id, class_name, file_name, tier, rarity, alignment, element,
                          level, exp, health, attack, defense, in_party, party_slot, star_level`,
-              [playerId, g.className, g.tier, g.theme, seed, rarity,
+              [playerId, g.className, g.fileName, g.tier, seed, rarity,
                g.alignment, g.element, g.health, g.attack, g.defense]
             );
             if (ins.rowCount && ins.rowCount > 0) {

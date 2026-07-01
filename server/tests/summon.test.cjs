@@ -93,7 +93,9 @@ check("generateHero stats stay positive and tier matches band", () => {
     const h = H.generateHero(42, rarity);
     assert(h.health > 0 && h.attack > 0 && h.defense >= 0, `${rarity} produced non-positive stat`);
     assert(h.tier === H.TIER_BY_RARITY[rarity].tier, `${rarity} tier mismatch (${h.tier})`);
-    assert(H.THEMES.includes(h.theme), `${rarity} produced unknown theme ${h.theme}`);
+    // The image system replaced `theme` with `fileName` (the actual art asset).
+    assert(typeof h.fileName === "string" && h.fileName.length > 0, `${rarity} produced empty fileName`);
+    assert(h.className === h.fileName, `${rarity} className should equal fileName (display name = art name)`);
   }
 });
 

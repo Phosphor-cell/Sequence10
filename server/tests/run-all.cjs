@@ -1,6 +1,6 @@
 // Runs all test suites. Pure-logic always; integration only if DATABASE_URL set.
 const { execSync } = require('child_process');
-const suites = ['progression.test.cjs', 'affinity.test.cjs', 'damage.test.cjs', 'format.test.cjs', 'summon.test.cjs', 'synergy.test.cjs', 'narrative_parse.test.cjs'];
+const suites = ['progression.test.cjs', 'affinity.test.cjs', 'damage.test.cjs', 'format.test.cjs', 'summon.test.cjs', 'synergy.test.cjs', 'narrative_parse.test.cjs', 'power.test.cjs', 'bloodline_roll.test.cjs'];
 if (process.env.DATABASE_URL) suites.push('integration.test.cjs');
 else console.log('(DATABASE_URL not set — skipping integration.test)\n');
 

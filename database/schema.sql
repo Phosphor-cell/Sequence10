@@ -129,6 +129,7 @@ CREATE TABLE summoned_heroes (
   player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
   
   class_name VARCHAR(64) NOT NULL,
+  file_name VARCHAR(64),                          -- actual image filename (without .jpg), derived from tier
   tier VARCHAR(32) NOT NULL CHECK (tier IN ('mortal', 'heroic', 'angelic', 'divine')),
   seed BIGINT NOT NULL,
   

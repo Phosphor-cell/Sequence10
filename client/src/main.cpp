@@ -128,7 +128,7 @@ static long long g_idleSeconds = 0;
 
 // ─── Hero roster + teams ───────────────────────────────────────────────
 struct Hero {
-    std::string id, className, tier, theme, rarity, alignment, element;
+    std::string id, className, file_name, tier, rarity, alignment, element;
     int health = 0, attack = 0, defense = 0;
     int level = 1;
     int starLevel = 1;                      // 1..6; raised via shard star-up
@@ -206,51 +206,51 @@ static Color rarityColor(const std::string& r) {
 }
 
 // ─── Hero sprite cache (graceful: art appears when the file exists) ─────
-// Looks for assets/heroes/<classname>.png (lowercased, spaces/hyphens kept as
-// a slug). If found, caches and returns the texture; otherwise returns a
-// 0-id texture and the UI falls back to the colored card. This lets you drop
-// in Leonardo art one class at a time — present classes show their sprite,
-// missing ones (e.g. tiers 4-5 not generated yet) keep the placeholder card.
-static std::map<std::string, Texture2D> g_heroSprites;   // className -> texture
+// Looks for assets/heros/tier<N>/<filename>.jpg based on a hero's tier and file_name.
+// If found, caches and returns the texture; otherwise returns a 0-id texture and the
+// UI falls back to the colored card. This lets you drop in art one character at a time.
+static std::map<std::string, Texture2D> g_heroSprites;      // fileName -> texture
 static std::map<std::string, bool>      g_heroSpriteTried;
 
-static std::string classSlug(const std::string& className) {
-    std::string s;
-    for (char c : className) {
-        if (c == ' ') s += '_';
-        else s += (char)tolower((unsigned char)c);
-    }
-    return s; // "Shadow-Dancer" -> "shadow-dancer", "Beast-Master" -> "beast-master"
+// Map tier names (mortal/heroic/angelic/divine) to tier folder numbers (tier1-5)
+static std::string tierToFolder(const std::string& tier) {
+    if (tier == "mortal")  return "tier1";
+    if (tier == "heroic")  return "tier2";
+    if (tier == "angelic") return "tier4";
+    if (tier == "divine")  return "tier5";
+    return "tier1";  // fallback
 }
 
-// Returns a sprite texture for the class, or {0} if none exists yet.
-static Texture2D heroSprite(const std::string& className) {
-    auto it = g_heroSprites.find(className);
+// Returns a sprite texture for the hero, or {0} if none exists yet.
+// Uses the tier folder + file_name (no extension) to construct the path.
+static Texture2D heroSprite(const std::string& fileName, const std::string& tier) {
+    if (fileName.empty()) return Texture2D{ 0 };
+    auto it = g_heroSprites.find(fileName);
     if (it != g_heroSprites.end()) return it->second;
-    if (g_heroSpriteTried[className]) return Texture2D{ 0 };
-    g_heroSpriteTried[className] = true;
+    if (g_heroSpriteTried[fileName]) return Texture2D{ 0 };
+    g_heroSpriteTried[fileName] = true;
 
-    std::string slug = classSlug(className);
+    std::string tierFolder = tierToFolder(tier);
     const std::string candidates[] = {
-        "assets/heroes/" + slug + ".png",
-        "assets/heroes/" + slug + ".jpg",
+        "assets/heros/" + tierFolder + "/" + fileName + ".jpg",
+        "assets/heros/" + tierFolder + "/" + fileName + ".png",
     };
     for (const auto& path : candidates) {
         if (FileExists(path.c_str())) {
             Texture2D t = LoadTexture(path.c_str());
             if (t.id != 0) {
                 SetTextureFilter(t, TEXTURE_FILTER_BILINEAR);
-                g_heroSprites[className] = t;
+                g_heroSprites[fileName] = t;
                 return t;
             }
         }
     }
-    return Texture2D{ 0 };
+    return Texture2D{ 0 };  // not found
 }
 
 // draw a hero sprite fitted into a box, or return false if no art exists.
-static bool drawHeroSprite(const std::string& className, Rectangle box) {
-    Texture2D t = heroSprite(className);
+static bool drawHeroSprite(const std::string& fileName, const std::string& tier, Rectangle box) {
+    Texture2D t = heroSprite(fileName, tier);
     if (t.id == 0) return false;
     float scale = std::min(box.width / t.width, box.height / t.height);
     float w = t.width * scale, h = t.height * scale;
@@ -510,8 +510,8 @@ static void fetchHeroes() {
             Hero hero;
             hero.id        = h.value("id", std::string(""));
             hero.className = h.value("class_name", std::string("Unknown"));
+            hero.file_name = h.value("file_name", std::string(""));
             hero.tier      = h.value("tier", std::string("mortal"));
-            hero.theme     = h.value("theme", std::string("medieval"));
             hero.rarity    = h.value("rarity", std::string("Common"));
             hero.alignment = h.value("alignment", std::string("neutral"));
             hero.element   = h.value("element", std::string("neutral"));
@@ -1186,7 +1186,7 @@ static void drawHeroes(Vector2 mouse, bool clicked) {
         DrawRectangleLinesEx(card, 2, rc);
         // sprite thumbnail (left), or a rarity-tinted placeholder box if no art
         Rectangle thumb = { (float)(px + 6), (float)(py + 6), 80, 80 };
-        if (!drawHeroSprite(h.className, thumb)) {
+        if (!drawHeroSprite(h.file_name, h.tier, thumb)) {
             DrawRectangleRec(thumb, { rc.r, rc.g, rc.b, 40 });
             DrawRectangleLinesEx(thumb, 1, rc);
             // initial letter as a stand-in
@@ -1254,7 +1254,7 @@ static void drawTeam(Vector2 mouse, bool clicked) {
             DrawText(TextFormat("Slot %d", i + 1), px + 12, sy + 8, 12, Col::C_TXT_DIM);
             // sprite portrait at top of the slot (or tinted placeholder)
             Rectangle port = { (float)(px + 12), (float)(sy + 26), (float)(slotW - 24), 96 };
-            if (!drawHeroSprite(h->className, port)) {
+            if (!drawHeroSprite(h->file_name, h->tier, port)) {
                 DrawRectangleRec(port, { rc.r, rc.g, rc.b, 35 });
                 DrawRectangleLinesEx(port, 1, rc);
                 std::string init(1, h->className.empty() ? '?' : h->className[0]);
@@ -1320,7 +1320,7 @@ static void drawInventoryParty(Vector2 mouse, bool clicked) {
         if (h) {
             Color rc = rarityColor(h->rarity);
             Rectangle port = { (float)(px + 10), (float)(sy + 26), (float)(slotW - 20), 66 };
-            if (!drawHeroSprite(h->className, port)) {
+            if (!drawHeroSprite(h->file_name, h->tier, port)) {
                 DrawRectangleRec(port, { rc.r, rc.g, rc.b, 35 });
                 DrawRectangleLinesEx(port, 1, rc);
                 std::string init(1, h->className.empty() ? '?' : h->className[0]);
@@ -1383,7 +1383,7 @@ static void drawInventoryParty(Vector2 mouse, bool clicked) {
         DrawRectangleLinesEx(card, inParty ? 2 : 1, inParty ? Col::C_GREENY : rc);
 
         Rectangle thumb = { (float)(px + 6), (float)(py + 6), 58, 58 };
-        if (!drawHeroSprite(hh.className, thumb)) {
+        if (!drawHeroSprite(hh.file_name, hh.tier, thumb)) {
             DrawRectangleRec(thumb, { rc.r, rc.g, rc.b, 40 });
             DrawRectangleLinesEx(thumb, 1, rc);
             std::string init(1, hh.className.empty() ? '?' : hh.className[0]);
