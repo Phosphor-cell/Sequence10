@@ -114,14 +114,20 @@ static long long g_idleSeconds = 0;
 
 // ─── Hero roster + teams ───────────────────────────────────────────────
 struct Hero {
-    std::string id, className, tier, rarity, alignment, element;
+    std::string id, className, tier, theme, rarity, alignment, element;
     int health = 0, attack = 0, defense = 0;
+    int level = 1;
+    int starLevel = 1;                      // 1..6; raised via shard star-up
+    bool inParty = false;
+    int  partySlot = -1;                    // 0..4 when in party, -1 when benched
 };
 static std::vector<Hero> g_heroes;          // owned roster
 static int  g_heroTab = 0;                  // 0=All 1=Medieval 2=XianxiaN 3=XianxiaH 4=VictorianN 5=VictorianH
-static std::string g_teamSlots[5];          // hero ids in the active team (by position)
+static std::string g_teamSlots[5];          // hero ids in the active team (mirrors server in_party/party_slot)
 static int  g_teamPickPos = -1;             // which team slot we're assigning, -1 = none
 static bool g_heroesFetched = false;
+static int  g_invTab = 0;                   // INVENTORY tabs: 0 = Gear, 1 = Party
+static std::map<std::string, int> g_heroShards; // class_name -> shard balance (for star-up UI)
 
 // ─── Colour palette ────────────────────────────────────────────────────
 namespace Col {
@@ -411,7 +417,17 @@ static void claimIdle() {
     }
 }
 
-// ─── Hero/team networking ──────────────────────────────────────────────
+// ─── Hero / party networking ───────────────────────────────────────────
+// The roster (each hero's in_party / party_slot) is the single source of truth.
+// g_teamSlots is just a local mirror, rebuilt from the roster after every fetch
+// so the UI and the server can never drift apart.
+static void rebuildTeamSlotsFromRoster() {
+    for (int i = 0; i < 5; i++) g_teamSlots[i].clear();
+    for (auto& h : g_heroes)
+        if (h.inParty && h.partySlot >= 0 && h.partySlot < 5)
+            g_teamSlots[h.partySlot] = h.id;
+}
+
 static void fetchHeroes() {
     if (g_player.id.empty()) return;
     auto res = apiPost("heroes", { { "playerId", g_player.id }, { "action", "list" } });
@@ -422,16 +438,27 @@ static void fetchHeroes() {
             hero.id        = h.value("id", std::string(""));
             hero.className = h.value("class_name", std::string("Unknown"));
             hero.tier      = h.value("tier", std::string("mortal"));
+            hero.theme     = h.value("theme", std::string("medieval"));
             hero.rarity    = h.value("rarity", std::string("Common"));
             hero.alignment = h.value("alignment", std::string("neutral"));
             hero.element   = h.value("element", std::string("neutral"));
+            hero.level     = h.value("level", 1);
+            hero.starLevel = h.value("star_level", 1);
             hero.health    = h.value("health", 0);
             hero.attack    = h.value("attack", 0);
             hero.defense   = h.value("defense", 0);
+            hero.inParty   = h.value("in_party", false);
+            // party_slot is null when benched — value() only defaults on a MISSING
+            // key, not a null one, so read it explicitly to avoid a type throw.
+            hero.partySlot = -1;
+            if (h.contains("party_slot") && h["party_slot"].is_number_integer())
+                hero.partySlot = h["party_slot"].get<int>();
             g_heroes.push_back(hero);
         }
     }
+    rebuildTeamSlotsFromRoster();
     g_heroesFetched = true;
+    fetchHeroShards();
 }
 
 static void summonHeroes(int count) {
@@ -441,28 +468,80 @@ static void summonHeroes(int count) {
         int n = (int)res["summoned"].size();
         appendStory("Summoned " + std::to_string(n) + " hero(es).");
         fetchHeroes();   // refresh roster
+    } else if (res.contains("error")) {
+        appendStory("Summon failed: " + res.value("error", std::string("unknown")));
     }
 }
 
-static void loadActiveTeam() {
+// Place one hero into a party slot (server kicks out whoever was there).
+static void equipHeroToSlot(const std::string& heroId, int slot) {
+    if (g_player.id.empty() || heroId.empty() || slot < 0 || slot >= 5) return;
+    apiPost("heroes", { { "playerId", g_player.id }, { "action", "equip" },
+                        { "heroId", heroId }, { "slot", slot } });
+    fetchHeroes();   // re-pull truth (also rebuilds g_teamSlots)
+}
+
+// Bench a hero by slot or by id.
+static void unequipSlot(int slot) {
+    if (g_player.id.empty() || slot < 0 || slot >= 5) return;
+    apiPost("heroes", { { "playerId", g_player.id }, { "action", "unequip" }, { "slot", slot } });
+    fetchHeroes();
+}
+static void unequipHero(const std::string& heroId) {
+    if (g_player.id.empty() || heroId.empty()) return;
+    apiPost("heroes", { { "playerId", g_player.id }, { "action", "unequip" }, { "heroId", heroId } });
+    fetchHeroes();
+}
+
+// Pull the player's hero-shard balances (class_name -> count), used by the
+// star-up button to show "have X / need Y" and grey out when unaffordable.
+static void fetchHeroShards() {
     if (g_player.id.empty()) return;
-    auto res = apiPost("team", { { "playerId", g_player.id }, { "action", "get" }, { "slot", 0 } });
-    for (int i = 0; i < 5; i++) g_teamSlots[i].clear();
-    if (res.contains("members") && res["members"].is_array()) {
-        for (auto& m : res["members"]) {
-            int pos = m.value("position", -1);
-            if (pos >= 0 && pos < 5) g_teamSlots[pos] = m.value("id", std::string(""));
+    auto res = apiPost("heroes", { { "playerId", g_player.id }, { "action", "shards" } });
+    g_heroShards.clear();
+    if (res.contains("shards") && res["shards"].is_array()) {
+        for (auto& s : res["shards"]) {
+            g_heroShards[s.value("class_name", std::string(""))] = s.value("shards", 0);
         }
     }
 }
 
+// Spend shards to raise one hero's star level by 1 (server validates cost
+// and ownership; this just calls it and refreshes truth from the response).
+static void starUpHero(const std::string& heroId) {
+    if (g_player.id.empty() || heroId.empty()) return;
+    auto res = apiPost("heroes", { { "playerId", g_player.id }, { "action", "starUp" }, { "heroId", heroId } });
+    if (res.value("ok", false)) {
+        appendStory("Star-up! " + res["hero"].value("class_name", std::string("Hero")) +
+                    " is now " + std::to_string(res["hero"].value("star_level", 1)) + "-star.");
+        fetchHeroes();
+        fetchHeroShards();
+    } else if (res.contains("error")) {
+        std::string err = res.value("error", std::string("unknown"));
+        if (err == "insufficient shards") {
+            appendStory("Not enough shards: need " + std::to_string(res.value("need", 0)) +
+                        ", have " + std::to_string(res.value("have", 0)) + ".");
+        } else if (err == "hero already at max star level") {
+            appendStory("Already at max star level.");
+        } else {
+            appendStory("Star-up failed: " + err);
+        }
+    }
+}
+
+// Back-compat shims for the existing HEROES/TEAM screens: both now route through
+// the real `heroes` endpoint instead of the (never-implemented) `team` one.
 static void saveActiveTeam() {
     if (g_player.id.empty()) return;
-    json ids = json::array();
-    for (int i = 0; i < 5; i++) if (!g_teamSlots[i].empty()) ids.push_back(g_teamSlots[i]);
-    apiPost("team", { { "playerId", g_player.id }, { "action", "save" },
-                      { "slot", 0 }, { "name", "Main Team" }, { "heroIds", ids } });
-    apiPost("team", { { "playerId", g_player.id }, { "action", "setActive" }, { "slot", 0 } });
+    json slots = json::array();
+    for (int i = 0; i < 5; i++)
+        slots.push_back(g_teamSlots[i].empty() ? json(nullptr) : json(g_teamSlots[i]));
+    apiPost("heroes", { { "playerId", g_player.id }, { "action", "setParty" }, { "slots", slots } });
+    fetchHeroes();
+}
+static void loadActiveTeam() {
+    if (!g_heroesFetched) fetchHeroes();
+    else rebuildTeamSlotsFromRoster();
 }
 
 // Background sync: HTTP runs off-thread; result is applied on the main
@@ -819,23 +898,17 @@ static void drawShop(Vector2 mouse, bool clicked) {
     }
 }
 
-// ─── INVENTORY ─────────────────────────────────────────────────────────
-static void drawInventory(Vector2 mouse, bool clicked) {
-    drawBackdropCover({ 0 });
-    DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Col::C_OVERLAY);
-    drawTopBar();
-    if (drawBack(mouse, clicked)) g_screen = Screen::HOME;
+// ─── INVENTORY (tabbed: Gear | Party) ──────────────────────────────────
+static void drawInventoryParty(Vector2 mouse, bool clicked);   // defined after the hero helpers below
 
-    DrawText("INVENTORY", SCREEN_WIDTH / 2 - 80, 60, 28, Col::C_ACCENT);
-
+static void drawInventoryGear(Vector2 mouse, bool clicked, float contentY) {
     if (g_inventory.empty()) {
         DrawText("No items yet. Win battles to collect loot.",
                  SCREEN_WIDTH / 2 - 180, SCREEN_HEIGHT / 2, 16, Col::C_TXT_DIM);
         return;
     }
-
     float cardW = 220, cardH = 96, gap = 16;
-    float startX = 100, startY = 120;
+    float startX = 100, startY = contentY;
     int perRow = 5;
     for (size_t i = 0; i < g_inventory.size(); ++i) {
         int row = (int)i / perRow;
@@ -862,6 +935,33 @@ static void drawInventory(Vector2 mouse, bool clicked) {
     }
 }
 
+static void drawInventory(Vector2 mouse, bool clicked) {
+    drawBackdropCover({ 0 });
+    DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Col::C_OVERLAY);
+    drawTopBar();
+    if (drawBack(mouse, clicked)) { g_teamPickPos = -1; g_screen = Screen::HOME; }
+
+    DrawText("INVENTORY", SCREEN_WIDTH / 2 - 80, 56, 28, Col::C_ACCENT);
+
+    // Tabs: Gear | Party
+    const char* tabs[2] = { "Gear", "Party" };
+    int tx = 100, ty = 96;
+    for (int i = 0; i < 2; i++) {
+        int tw = MeasureText(tabs[i], 16) + 36;
+        Rectangle tab = { (float)tx, (float)ty, (float)tw, 32 };
+        bool hov = CheckCollisionPointRec(mouse, tab);
+        bool sel = (g_invTab == i);
+        DrawRectangleRec(tab, sel ? Col::C_ACCENT : (hov ? Col::C_PANEL_HI : Col::C_PANEL));
+        DrawRectangleLinesEx(tab, 1, sel ? Col::C_ACCENT : Col::C_BORDER);
+        DrawText(tabs[i], tx + 18, ty + 8, 16, sel ? Col::C_BG_DEEP : Col::C_TXT);
+        if (clicked && hov) { g_invTab = i; g_teamPickPos = -1; }
+        tx += tw + 8;
+    }
+
+    if (g_invTab == 0) drawInventoryGear(mouse, clicked, 150.f);
+    else               drawInventoryParty(mouse, clicked);
+}
+
 // ─── SUMMON ────────────────────────────────────────────────────────────
 static std::string g_lastSummon;
 static float        g_summonFlash = 0.f;
@@ -879,11 +979,12 @@ static void doSummon() {
 
 // ─── HEROES (tabbed roster) ────────────────────────────────────────────
 static const char* HERO_TABS[]   = { "All", "Medieval", "Xianxia", "Corrupted", "Victorian", "Eldritch" };
-// maps each tab to the DB tier string it filters (tab 0 = All)
-static const char* TAB_TIER[]    = { "", "medieval", "xianxia_normal", "xianxia_horror", "victorian_normal", "victorian_horror" };
+// maps each tab to the DB theme string it filters (tab 0 = All). Theme is the
+// setting/aesthetic axis, separate from the mortal/heroic/angelic/divine power tier.
+static const char* TAB_THEME[]   = { "", "medieval", "xianxia_normal", "xianxia_horror", "victorian_normal", "victorian_horror" };
 static bool heroPassesTab(const Hero& h) {
     if (g_heroTab == 0) return true;
-    return h.tier == TAB_TIER[g_heroTab];
+    return h.theme == TAB_THEME[g_heroTab];
 }
 
 static void drawHeroes(Vector2 mouse, bool clicked) {
@@ -1032,6 +1133,148 @@ static void drawTeam(Vector2 mouse, bool clicked) {
     for (int i = 0; i < 5; i++) { const Hero* h = g_teamSlots[i].empty() ? nullptr : heroById(g_teamSlots[i]); if (h) { totalAtk += h->attack; totalHp += h->health; members++; } }
     DrawText(TextFormat("Team Power:  %lld ATK   %lld HP   (%d/5 heroes)", totalAtk, totalHp, members),
              sx, sy + slotH + 30, 16, Col::C_GOLD);
+}
+
+// ─── INVENTORY > PARTY tab ─────────────────────────────────────────────
+// Equip/unequip heroes into a 5-slot active party, persisted server-side.
+// NOTE: equip/unequip call fetchHeroes() which rebuilds g_heroes, so every
+// handler RETURNS immediately after to avoid iterating a mutated container.
+static void drawInventoryParty(Vector2 mouse, bool clicked) {
+    if (!g_heroesFetched) fetchHeroes();
+
+    // ── Active party: 5 slots across the top ──
+    int slotW = 150, slotH = 150, gap = 14;
+    int totalW = slotW * 5 + gap * 4;
+    int sx = (SCREEN_WIDTH - totalW) / 2, sy = 156;
+
+    DrawText("ACTIVE PARTY", sx, sy - 26, 16, Col::C_ACCENT_2);
+    long long tAtk = 0, tHp = 0; int members = 0;
+    for (int i = 0; i < 5; i++) {
+        const Hero* h = g_teamSlots[i].empty() ? nullptr : heroById(g_teamSlots[i]);
+        if (h) { tAtk += h->attack; tHp += h->health; members++; }
+    }
+    DrawText(TextFormat("Power: %lld ATK  %lld HP  (%d/5)", tAtk, tHp, members),
+             sx + totalW - 300, sy - 24, 14, Col::C_GOLD);
+
+    for (int i = 0; i < 5; i++) {
+        int px = sx + i * (slotW + gap);
+        Rectangle slot = { (float)px, (float)sy, (float)slotW, (float)slotH };
+        bool hov = CheckCollisionPointRec(mouse, slot);
+        bool picking = (g_teamPickPos == i);
+        const Hero* h = g_teamSlots[i].empty() ? nullptr : heroById(g_teamSlots[i]);
+
+        drawPanel(px, sy, slotW, slotH, picking ? Col::C_PANEL_HI : Col::C_PANEL);
+        DrawRectangleLinesEx(slot, picking ? 3 : 1, picking ? Col::C_GOLD : Col::C_BORDER);
+        DrawText(TextFormat("Slot %d", i + 1), px + 10, sy + 8, 11, Col::C_TXT_DIM);
+
+        if (h) {
+            Color rc = rarityColor(h->rarity);
+            Rectangle port = { (float)(px + 10), (float)(sy + 26), (float)(slotW - 20), 66 };
+            if (!drawHeroSprite(h->className, port)) {
+                DrawRectangleRec(port, { rc.r, rc.g, rc.b, 35 });
+                DrawRectangleLinesEx(port, 1, rc);
+                std::string init(1, h->className.empty() ? '?' : h->className[0]);
+                DrawText(init.c_str(), (int)(port.x + port.width / 2 - 10), (int)(port.y + 18), 32, rc);
+            }
+            std::string nm = h->className.size() > 16 ? h->className.substr(0, 14) + ".." : h->className;
+            DrawText(nm.c_str(), px + 10, sy + 98, 12, Col::C_TXT);
+            DrawText(TextFormat("Lv%d  %s  %d*", h->level, h->rarity.c_str(), h->starLevel), px + 10, sy + 114, 10, rc);
+            DrawText(TextFormat("ATK %d  DEF %d", h->attack, h->defense), px + 10, sy + 130, 10, Col::C_TXT_DIM);
+
+            Rectangle rm = { (float)(px + slotW - 26), (float)(sy + 6), 20, 20 };
+            bool rmHov = CheckCollisionPointRec(mouse, rm);
+            DrawRectangleRec(rm, rmHov ? Col::C_REDDY : Col::C_PANEL_HI);
+            DrawText("x", (int)rm.x + 6, (int)rm.y + 3, 14, Col::C_TXT);
+            if (clicked && rmHov) { unequipSlot(i); return; }
+            if (clicked && hov && !rmHov) g_teamPickPos = (g_teamPickPos == i ? -1 : i);
+        } else {
+            DrawText("+ empty", px + slotW / 2 - 30, sy + slotH / 2 - 8, 14, Col::C_TXT_DIM);
+            if (clicked && hov) g_teamPickPos = (g_teamPickPos == i ? -1 : i);
+        }
+    }
+
+    const char* hint = (g_teamPickPos >= 0)
+        ? "Slot selected — tap a hero below to place it here."
+        : "Tap a slot to select it, or tap any hero below to fill the first empty slot.";
+    DrawText(hint, sx, sy + slotH + 10, 12, Col::C_TXT_DIM);
+
+    // ── Roster: theme tabs + summon shortcut ──
+    int rty = sy + slotH + 34, rtx = sx;
+    for (int i = 0; i < 6; i++) {
+        int tw = MeasureText(HERO_TABS[i], 13) + 20;
+        Rectangle tab = { (float)rtx, (float)rty, (float)tw, 26 };
+        bool hov = CheckCollisionPointRec(mouse, tab);
+        bool sel = (g_heroTab == i);
+        DrawRectangleRec(tab, sel ? Col::C_ACCENT : (hov ? Col::C_PANEL_HI : Col::C_PANEL));
+        DrawText(HERO_TABS[i], rtx + 10, rty + 6, 13, sel ? Col::C_BG_DEEP : Col::C_TXT);
+        if (clicked && hov) g_heroTab = i;
+        rtx += tw + 6;
+    }
+    Rectangle sm = { (float)(sx + totalW - 130), (float)rty, 130, 26 };
+    bool smHov = CheckCollisionPointRec(mouse, sm);
+    DrawRectangleRec(sm, smHov ? Col::C_PANEL_HI : Col::C_PANEL);
+    DrawRectangleLinesEx(sm, 1, Col::C_ACCENT_2);
+    DrawText("Go to Summon", (int)sm.x + 12, (int)sm.y + 6, 13, Col::C_ACCENT_2);
+    if (clicked && smHov) { g_teamPickPos = -1; g_screen = Screen::SUMMON; return; }
+
+    // ── Roster grid ──
+    int gy = rty + 36, gx = sx, cw = 188, ch = 70, col = 0;
+    int perRow = totalW / (cw + 10); if (perRow < 1) perRow = 1;
+    int shown = 0;
+    for (auto& hh : g_heroes) {
+        if (!heroPassesTab(hh)) continue;
+        int px = gx + col * (cw + 10);
+        int py = gy + (shown / perRow) * (ch + 10);
+        if (py > SCREEN_HEIGHT - 70) break;
+        Rectangle card = { (float)px, (float)py, (float)cw, (float)ch };
+        Color rc = rarityColor(hh.rarity);
+        bool inParty = hh.inParty;
+        drawPanel(px, py, cw, ch);
+        DrawRectangleLinesEx(card, inParty ? 2 : 1, inParty ? Col::C_GREENY : rc);
+
+        Rectangle thumb = { (float)(px + 6), (float)(py + 6), 58, 58 };
+        if (!drawHeroSprite(hh.className, thumb)) {
+            DrawRectangleRec(thumb, { rc.r, rc.g, rc.b, 40 });
+            DrawRectangleLinesEx(thumb, 1, rc);
+            std::string init(1, hh.className.empty() ? '?' : hh.className[0]);
+            DrawText(init.c_str(), (int)thumb.x + 20, (int)thumb.y + 16, 26, rc);
+        }
+        int textX = px + 72;
+        std::string nm = hh.className.size() > 14 ? hh.className.substr(0, 12) + ".." : hh.className;
+        DrawText(nm.c_str(), textX, py + 8, 13, Col::C_TXT);
+        DrawText(TextFormat("Lv%d %s %d*", hh.level, hh.rarity.c_str(), hh.starLevel), textX, py + 26, 10, rc);
+        DrawText(TextFormat("ATK %d DEF %d", hh.attack, hh.defense), textX, py + 42, 10, Col::C_TXT_DIM);
+        if (inParty) DrawText("IN PARTY", textX, py + 55, 9, Col::C_GREENY);
+
+        // Star-up button: only worth showing if the hero isn't maxed. Cost
+        // mirrors the server's STAR_UP_COST ramp (5/10/20/40/80 for 1->6).
+        if (hh.starLevel < 6) {
+            static const int STAR_COST[6] = { 0, 5, 10, 20, 40, 80 }; // index by current star
+            int cost = STAR_COST[hh.starLevel];
+            int have = g_heroShards.count(hh.className) ? g_heroShards[hh.className] : 0;
+            bool afford = have >= cost;
+            Rectangle su = { (float)(px + cw - 54), (float)(py + ch - 20), 50, 16 };
+            bool suHov = CheckCollisionPointRec(mouse, su);
+            DrawRectangleRec(su, afford ? (suHov ? Col::C_GOLD : Col::C_PANEL_HI) : Col::C_PANEL);
+            DrawRectangleLinesEx(su, 1, afford ? Col::C_GOLD : Col::C_BORDER);
+            DrawText(TextFormat("%d/%d", have, cost), (int)su.x + 4, (int)su.y + 3, 9,
+                      afford ? Col::C_BG_DEEP : Col::C_TXT_DIM);
+            if (clicked && suHov) { if (afford) starUpHero(hh.id); return; }
+        } else {
+            DrawText("MAX", px + cw - 40, py + ch - 18, 11, Col::C_GOLD);
+        }
+
+        if (clicked && CheckCollisionPointRec(mouse, card)) {
+            if (inParty) { unequipHero(hh.id); return; }              // toggle out
+            if (g_teamPickPos >= 0) { equipHeroToSlot(hh.id, g_teamPickPos); g_teamPickPos = -1; return; }
+            int target = -1;
+            for (int s = 0; s < 5; s++) if (g_teamSlots[s].empty()) { target = s; break; }
+            if (target >= 0) { equipHeroToSlot(hh.id, target); return; }
+        }
+        shown++; col = shown % perRow;
+    }
+    if (shown == 0)
+        DrawText("No heroes yet. Summon to build your roster.", sx, gy, 14, Col::C_TXT_DIM);
 }
 
 // ─── SUMMON ────────────────────────────────────────────────────────────

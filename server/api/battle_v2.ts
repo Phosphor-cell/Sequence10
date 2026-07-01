@@ -16,21 +16,24 @@
 // returned as STRINGS. The client parses/formats them (it already uses uint64).
 
 import { VercelRequest, VercelResponse } from "@vercel/node";
+import { ELEMENTS, Element } from "./_herogen";
+import { resolveAbilities, effectivePenForElement, AbilityMod, ResolvedSynergy } from "./_synergy";
 
 const U64_MAX = (1n << 64n) - 1n;          // 18,446,744,073,709,551,615
 const U32_MAX = (1n << 32n) - 1n;          // 4,294,967,295
 
 interface Build {
   baseAttack: bigint;
-  multipliers: number[];   // multiplicative damage sources (gear, synergies, affinity)
-  critChance: number;      // >=1.0 guarantees crit; integer part = red-crit tier
+  attackMultPct: number;   // additive % from abilities; applied as (1 + pct)
+  attackerElement: Element; // which element this build's damage is typed as
+  critChance: number;      // base + ability contribution; >=1.0 = red-crit tier
   critMult: number;        // 3.0 = 300% crit damage
-  armorPen: number;        // 0..1 fraction of boss defense bypassed
+  synergy: ResolvedSynergy; // resolved ability totals (pen per element, etc.)
 }
 
 interface BossDef {
   hp: bigint;
-  defense: bigint;
+  defense: Record<Element, bigint>;  // per-element defense (weakness/resist profile)
   evade: number;           // 0..1, kept low (1-10%) per design
   block: number;           // 0..1, halves damage on proc
   afkWindow: number;       // attacks resolved per run (the tuning knob)
@@ -42,10 +45,15 @@ function mulBig(v: bigint, factor: number): bigint {
 }
 
 function computeHit(b: Build, boss: BossDef, isCrit: boolean): bigint {
-  let atk = b.baseAttack;
-  for (const m of b.multipliers) atk = mulBig(atk, m);
+  // Attack scaled by ability attack-mult (additive % -> single multiplier).
+  let atk = mulBig(b.baseAttack, 1 + b.attackMultPct);
 
-  const effDef = mulBig(boss.defense, 1 - b.armorPen);
+  // Effective defense = this element's boss defense, reduced by the build's
+  // total penetration vs that element (global armor pen + element pen, capped).
+  const pen = effectivePenForElement(b.synergy, b.attackerElement);
+  const baseDef = boss.defense[b.attackerElement] ?? 0n;
+  const effDef = mulBig(baseDef, 1 - pen);
+
   // Diminishing-armor formula: dmg = atk^2 / (atk + effDef)
   let dmg = (atk * atk) / (atk + effDef + 1n);
 
@@ -97,22 +105,41 @@ function resolveFight(b: Build, boss: BossDef, seed: number) {
 }
 
 // Difficulty/rarity -> boss stats. The FINAL boss (max/max) is the uint64 wall.
+// Defense is now PER-ELEMENT: bosses have a weakness (one element with reduced
+// defense) and a resistance (one with raised defense), derived deterministically
+// from (difficulty, rarity) so the same fight is reproducible/shareable.
 function makeBoss(difficulty: number, rarity: number): BossDef {
   const isFinal = difficulty >= 10 && rarity >= 5;
+
+  // Build a per-element defense record from a single base value.
+  const buildDef = (base: bigint, allowProfile: boolean): Record<Element, bigint> => {
+    const def = {} as Record<Element, bigint>;
+    for (const e of ELEMENTS) def[e] = base;
+    if (allowProfile) {
+      // Deterministic weak/resist element indices (skip index 0 = neutral so
+      // neutral stays a stable baseline).
+      const span = ELEMENTS.length - 1;
+      const weakIdx   = 1 + (((difficulty * 7) + (rarity * 3)) % span);
+      const resistIdx = 1 + (((difficulty * 5) + (rarity * 11) + 3) % span);
+      def[ELEMENTS[weakIdx]] = mulBig(base, 0.40);                 // weakness: -60% def
+      if (resistIdx !== weakIdx) def[ELEMENTS[resistIdx]] = mulBig(base, 1.60); // resist: +60% def
+    }
+    return def;
+  };
+
   if (isFinal) {
     // Calibrated: perfect build wins ~0.3% ("by some miracle"), anything less ~0%.
-    return { hp: U64_MAX, defense: 500_000_000n, evade: 0.07, block: 0.05, afkWindow: 1600 };
+    // The wall has NO weakness — uniform max defense across every element.
+    return { hp: U64_MAX, defense: buildDef(500_000_000n, false), evade: 0.07, block: 0.05, afkWindow: 1600 };
   }
   // Normal-chapter bosses, calibrated so appropriately-geared players win ~80%.
-  // HP grows ~geometrically with difficulty (each chapter ~tier of power).
-  // Curve fit from simulation: roughly hp ≈ 9600 * (8.5 ^ (difficulty-1)).
   const d = Math.max(1, difficulty);
   const hpFloat = 9600 * Math.pow(8.5, d - 1);
   let hp = BigInt(Math.min(Number.MAX_SAFE_INTEGER, Math.floor(hpFloat)));
   if (hp > U64_MAX) hp = U64_MAX;
   return {
     hp,
-    defense: 1_000_000n * BigInt(d),
+    defense: buildDef(1_000_000n * BigInt(d), true),
     evade: Math.min(0.10, 0.02 + difficulty * 0.005),
     block: Math.min(0.08, 0.01 + difficulty * 0.004),
     afkWindow: 1600,
@@ -130,19 +157,38 @@ export default async (req: VercelRequest, res: VercelResponse) => {
   const difficulty = Number(body.difficulty ?? 1);
   const rarity = Number(body.rarity ?? 1);
 
-  // Build comes from the player's gear/abilities. For now accept it from the
-  // request (client computes it from equipped items); later read from Neon.
+  // Abilities come in as TYPED mods and are resolved through the governor
+  // (_synergy.resolveAbilities), which sums same-axis values and clamps every
+  // total. NOTE: today these are still accepted from the request; closing that
+  // trust hole (deriving them server-side from the player's party) is the next
+  // step. The governor's clamps mean even a malicious client can't exceed the
+  // balance caps, but it could still under-report — full enforcement comes when
+  // the party is read from Neon here.
+  const abilities: AbilityMod[] = Array.isArray(body.abilities) ? body.abilities : [];
+  const synergy = resolveAbilities(abilities);
+
+  const reqElement = String(body.attackerElement ?? "neutral") as Element;
+  const attackerElement: Element =
+    (ELEMENTS as readonly string[]).includes(reqElement) ? reqElement : "neutral";
+
   const build: Build = {
     baseAttack: BigInt(body.baseAttack ?? 100),
-    multipliers: Array.isArray(body.multipliers) ? body.multipliers : [],
-    critChance: Number(body.critChance ?? 0.15),
-    critMult: Number(body.critMult ?? 1.5),
-    armorPen: Number(body.armorPen ?? 0.0),
+    attackMultPct: synergy.attackMultPct,
+    attackerElement,
+    // base crit from request/gear PLUS the ability contribution from synergy
+    critChance: Number(body.critChance ?? 0.15) + synergy.critChance,
+    critMult: Number(body.critMult ?? 1.5) + synergy.critMult,
+    synergy,
   };
 
   const boss = makeBoss(difficulty, rarity);
   const seed = (Date.now() ^ (difficulty * 2654435761) ^ (rarity * 40503)) >>> 0;
   const r = resolveFight(build, boss, seed);
+
+  // Per-element defense profile (as strings — values can be large) so the
+  // client can show the boss's weakness/resistance.
+  const defenseProfile: Record<string, string> = {};
+  for (const e of ELEMENTS) defenseProfile[e] = boss.defense[e].toString();
 
   return res.status(200).json({
     victory: r.victory,
@@ -157,5 +203,10 @@ export default async (req: VercelRequest, res: VercelResponse) => {
     blocked: r.blocked,
     bossEvade: boss.evade,
     bossBlock: boss.block,
+    // ability/element transparency
+    attackerElement,
+    effectivePen: effectivePenForElement(synergy, attackerElement),
+    appliedAttackMultPct: synergy.attackMultPct,
+    bossDefenseProfile: defenseProfile,
   });
 };
