@@ -79,6 +79,20 @@ struct BattleState {
     int newLevel = 1;
 };
 
+struct NarrativeChoice {
+    std::string key;    // "A" / "B" / "C"
+    std::string text;
+};
+struct NarrativeState {
+    bool loaded = false;
+    int chapterNumber = 0;
+    std::string story;
+    std::vector<NarrativeChoice> choices;   // always 0 or exactly 3
+    std::string decisionId;
+    std::string playerChoice;               // empty = not chosen yet
+};
+static NarrativeState g_narrative;
+
 struct Chapter {
     int id = 0;
     std::string name;
@@ -126,6 +140,7 @@ static int  g_heroTab = 0;                  // 0=All 1=Medieval 2=XianxiaN 3=Xia
 static std::string g_teamSlots[5];          // hero ids in the active team (mirrors server in_party/party_slot)
 static int  g_teamPickPos = -1;             // which team slot we're assigning, -1 = none
 static bool g_heroesFetched = false;
+static bool g_narrativeFetched = false;
 static int  g_invTab = 0;                   // INVENTORY tabs: 0 = Gear, 1 = Party
 static std::map<std::string, int> g_heroShards; // class_name -> shard balance (for star-up UI)
 
@@ -587,6 +602,54 @@ static void starUpHero(const std::string& heroId) {
     }
 }
 
+// Get-or-generate the player's current chapter's AI-written story + 3 choices.
+// Server generates lazily on first view and persists it -- this is safe to
+// call every time the STORY screen is entered (see g_narrativeFetched guard).
+static void fetchCurrentNarrative() {
+    g_narrativeFetched = true;   // set first so a failed call doesn't retry-loop every frame
+    if (g_player.id.empty()) return;
+    auto res = apiPost("narrative", { { "playerId", g_player.id }, { "action", "current" } });
+    if (!res.contains("story")) {
+        std::string err = apiErrorText(res);
+        showToast("Couldn't load the story" + (err.empty() ? std::string("") : (" (" + err + ")")) + ".");
+        return;
+    }
+    g_narrative.loaded        = true;
+    g_narrative.chapterNumber = res.value("chapterNumber", 0);
+    g_narrative.story         = res.value("story", std::string(""));
+    g_narrative.decisionId    = res.value("decisionId", std::string(""));
+    // playerChoice is JSON null (not absent) until a choice is made -- .value()
+    // only defaults on a MISSING key, so guard explicitly (see party_slot above).
+    g_narrative.playerChoice.clear();
+    if (res.contains("playerChoice") && res["playerChoice"].is_string())
+        g_narrative.playerChoice = res["playerChoice"].get<std::string>();
+    g_narrative.choices.clear();
+    if (res.contains("choices") && res["choices"].is_array()) {
+        for (auto& c : res["choices"]) {
+            g_narrative.choices.push_back({
+                c.value("key", std::string("")), c.value("text", std::string(""))
+            });
+        }
+    }
+}
+
+// Record the player's pick for the current chapter's decision. Permanent --
+// the server rejects a second attempt on the same decision.
+static void chooseNarrative(const std::string& choiceKey) {
+    if (g_player.id.empty() || g_narrative.decisionId.empty()) return;
+    if (!g_narrative.playerChoice.empty()) return;   // client-side guard; server also enforces this
+    auto res = apiPost("narrative", {
+        { "playerId", g_player.id }, { "action", "choose" },
+        { "decisionId", g_narrative.decisionId }, { "choiceKey", choiceKey }
+    });
+    if (res.value("ok", false)) {
+        g_narrative.playerChoice = res.value("playerChoice", std::string(""));
+        appendStory("[Ch. " + std::to_string(g_narrative.chapterNumber) + "] " + g_narrative.playerChoice);
+    } else {
+        showToast("Couldn't record your choice: " + res.value("error", std::string("unknown")) + ".");
+    }
+}
+
 // Back-compat shims for the existing HEROES/TEAM screens: both now route through
 // the real `heroes` endpoint instead of the (never-implemented) `team` one.
 static void saveActiveTeam() {
@@ -810,7 +873,7 @@ static void drawHome(Vector2 mouse, bool clicked) {
 
     layoutNav();
     if (drawButton(g_navChapters, mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT))   g_screen = Screen::CHAPTER_SELECT;
-    if (drawButton(g_navStory,    mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT_2)) g_screen = Screen::STORY;
+    if (drawButton(g_navStory,    mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT_2)) { g_narrativeFetched = false; g_screen = Screen::STORY; }
     if (drawButton(g_navShop,     mouse, clicked, Col::C_PANEL_HI, Col::C_GOLD))     g_screen = Screen::SHOP;
     if (drawButton(g_navSummon,   mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT_2)) g_screen = Screen::SUMMON;
     if (drawButton(g_navHeroes,   mouse, clicked, Col::C_PANEL_HI, Col::C_ACCENT_2)) { g_heroesFetched = false; g_screen = Screen::HEROES; }
@@ -1420,6 +1483,8 @@ static void drawIndex(Vector2 mouse, bool clicked) {
 
 // ─── STORY ─────────────────────────────────────────────────────────────
 static void drawStory(Vector2 mouse, bool clicked) {
+    if (!g_narrativeFetched) fetchCurrentNarrative();
+
     drawBackdropCover({ 0 });
     DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Col::C_OVERLAY);
     drawTopBar();
@@ -1430,17 +1495,46 @@ static void drawStory(Vector2 mouse, bool clicked) {
     float x = 140, y = 110, w = SCREEN_WIDTH - 280;
     drawPanel(x, y, w, SCREEN_HEIGHT - y - 70);
     int px = (int)x + 24, py = (int)y + 20;
+    int contentW = (int)w - 48;
 
-    if (g_storyLog.empty()) {
-        DrawText("Your tale has not yet begun. Enter a chapter to start the story.",
-                 px, py, 14, Col::C_TXT_DIM);
+    if (!g_narrative.loaded) {
+        DrawText("Loading your story...", px, py, 14, Col::C_TXT_DIM);
         return;
     }
-    DrawText("STORY SUMMARY", px, py, 14, Col::C_ACCENT); py += 26;
-    for (auto& beat : g_storyLog) {
-        py = drawWrapped("- " + beat, px, py, (int)w - 48, 13, Col::C_TXT, 5);
-        py += 6;
-        if (py > SCREEN_HEIGHT - 90) break;
+
+    DrawText(TextFormat("CHAPTER %d", g_narrative.chapterNumber), px, py, 16, Col::C_GOLD);
+    py += 30;
+    py = drawWrapped(g_narrative.story, px, py, contentW, 15, Col::C_TXT, 6);
+    py += 20;
+
+    if (g_narrative.playerChoice.empty()) {
+        DrawText("WHAT DO YOU DO?", px, py, 13, Col::C_ACCENT_2);
+        py += 24;
+        for (auto& c : g_narrative.choices) {
+            Rectangle btn = { (float)px, (float)py, (float)contentW, 40 };
+            bool hov = pointInRect(mouse, btn);
+            DrawRectangleRounded(btn, 0.2f, 8, hov ? Col::C_PANEL_HI : Col::C_PANEL);
+            DrawRectangleRoundedLines(btn, 0.2f, 8, 1.5f, hov ? Col::C_ACCENT_2 : Col::C_BORDER);
+            std::string label = c.key + ".  " + c.text;
+            DrawText(label.c_str(), px + 14, py + 12, 14, hov ? Col::C_TXT : Col::C_TXT_DIM);
+            if (clicked && hov) { chooseNarrative(c.key); return; }
+            py += 48;
+        }
+    } else {
+        std::string chosen = "You chose: " + g_narrative.playerChoice;
+        DrawText(chosen.c_str(), px, py, 14, Col::C_GREENY);
+        py += 30;
+    }
+
+    // Compact recent-activity log underneath, if there's room left.
+    if (py < SCREEN_HEIGHT - 140 && !g_storyLog.empty()) {
+        DrawText("RECENT ACTIVITY", px, py, 12, Col::C_ACCENT); py += 20;
+        int shown = 0;
+        for (auto it = g_storyLog.rbegin(); it != g_storyLog.rend() && shown < 6; ++it, ++shown) {
+            py = drawWrapped("- " + *it, px, py, contentW, 12, Col::C_TXT_DIM, 4);
+            py += 4;
+            if (py > SCREEN_HEIGHT - 90) break;
+        }
     }
 }
 
